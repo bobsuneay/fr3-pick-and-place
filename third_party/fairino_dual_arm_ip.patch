@@ -1,0 +1,16 @@
+diff --git a/fairino_hardware_v3_9_7/src/fairino_hardware_interface.cpp b/fairino_hardware_v3_9_7/src/fairino_hardware_interface.cpp
+--- a/fairino_hardware_v3_9_7/src/fairino_hardware_interface.cpp
++++ b/fairino_hardware_v3_9_7/src/fairino_hardware_interface.cpp
+@@ -9,3 +9,12 @@
+     info_ = sysinfo;//info_是父类中定义的变量
++    // Read this instance's controller IP from the URDF
++    // <hardware><param name="robot_ip">...</param></hardware>.
++    auto robot_ip = info_.hardware_parameters.find("robot_ip");
++    if (robot_ip != info_.hardware_parameters.end() && !robot_ip->second.empty()) {
++        _controller_ip = robot_ip->second;
++    }
++    RCLCPP_INFO(rclcpp::get_logger("FairinoHardwareInterface"),
++                "FairinoHardwareInterface connecting to robot IP: %s",
++                _controller_ip.c_str());
+     
+     for (const hardware_interface::ComponentInfo& joint : info_.joints) {

@@ -1,0 +1,17 @@
+driver_package: fairino_hardware_v3_9_7
+firmware: '3.9.7'
+commissioned: false
+left:
+  robot_ip: ''
+  gripper_index: 1
+right:
+  robot_ip: ''
+  gripper_index: 2
+gripper:
+  vel: 50
+  force: 50
+  maxtime: 30000
+  # SDK 1 = non-blocking; real launch also normalizes old block: 0 files to 1.
+  block: 1
+  open_pos: 0
+  closed_pos: 100

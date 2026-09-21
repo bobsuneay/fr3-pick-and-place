@@ -1,0 +1,90 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 100
+
+    left_joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+    right_joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+    left_arm_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+    right_arm_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+    left_gripper_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+    right_gripper_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+left_joint_state_broadcaster:
+  ros__parameters:
+    joints:
+      - left_j1
+      - left_j2
+      - left_j3
+      - left_j4
+      - left_j5
+      - left_j6
+      - left_left_finger_joint
+      - left_right_finger_joint
+
+right_joint_state_broadcaster:
+  ros__parameters:
+    joints:
+      - right_j1
+      - right_j2
+      - right_j3
+      - right_j4
+      - right_j5
+      - right_j6
+      - right_left_finger_joint
+      - right_right_finger_joint
+
+left_arm_controller:
+  ros__parameters:
+    joints:
+      - left_j1
+      - left_j2
+      - left_j3
+      - left_j4
+      - left_j5
+      - left_j6
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+
+right_arm_controller:
+  ros__parameters:
+    joints:
+      - right_j1
+      - right_j2
+      - right_j3
+      - right_j4
+      - right_j5
+      - right_j6
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+
+left_gripper_controller:
+  ros__parameters:
+    joints:
+      - left_left_finger_joint
+      - left_right_finger_joint
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+
+right_gripper_controller:
+  ros__parameters:
+    joints:
+      - right_left_finger_joint
+      - right_right_finger_joint
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity

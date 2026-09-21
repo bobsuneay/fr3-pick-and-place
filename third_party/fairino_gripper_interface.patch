@@ -1,0 +1,447 @@
+diff --git a/fairino_hardware_v3_9_7/CMakeLists.txt b/fairino_hardware_v3_9_7/CMakeLists.txt
+index 1111111..2222222 100644
+--- a/fairino_hardware_v3_9_7/CMakeLists.txt
++++ b/fairino_hardware_v3_9_7/CMakeLists.txt
+@@ -40,7 +40,8 @@ add_executable(srv_test_client ${EXP_SRC_DIR})
+ add_library(
+   fairino_hardware 
+   SHARED 
+-  ./src/fairino_hardware_interface.cpp
++  ./src/fairino_hardware_interface.cpp
++  ./src/fairino_gripper_hardware_interface.cpp
+ )
+ 
+ #target_compile_definitions(ros2_cmd_server PRIVATE CHN_VERSION)
+diff --git a/fairino_hardware_v3_9_7/fairino_hardware.xml b/fairino_hardware_v3_9_7/fairino_hardware.xml
+index 1111111..2222222 100644
+--- a/fairino_hardware_v3_9_7/fairino_hardware.xml
++++ b/fairino_hardware_v3_9_7/fairino_hardware.xml
+@@ -5,3 +5,10 @@
+         </description>
+     </class>
++    <class name="fairino_hardware/FairinoGripperHardwareInterface"
++           type="fairino_hardware::FairinoGripperHardwareInterface"
++           base_class_type="hardware_interface::SystemInterface">
++        <description>
++            Hardware interface for a Fairino-attached HKV/TG-9801 gripper.
++        </description>
++    </class>
+ </library>
+diff --git a/fairino_hardware_v3_9_7/include/fairino_hardware/fairino_gripper_hardware_interface.hpp b/fairino_hardware_v3_9_7/include/fairino_hardware/fairino_gripper_hardware_interface.hpp
+new file mode 100644
+index 0000000..3333333
+--- /dev/null
++++ b/fairino_hardware_v3_9_7/include/fairino_hardware/fairino_gripper_hardware_interface.hpp
+@@ -0,0 +1,69 @@
++#ifndef FR_HARDWARE_GRIPPER_INTERFACE_
++#define FR_HARDWARE_GRIPPER_INTERFACE_
++
++#include <cstdint>
++#include <limits>
++#include <memory>
++#include <string>
++#include <vector>
++
++#include "hardware_interface/hardware_info.hpp"
++#include "hardware_interface/system_interface.hpp"
++#include "hardware_interface/types/hardware_interface_return_values.hpp"
++#include "hardware_interface/types/hardware_interface_type_values.hpp"
++#include "rclcpp/rclcpp.hpp"
++#include "libfairino/include/robot.h"
++
++namespace fairino_hardware
++{
++
++class FairinoGripperHardwareInterface : public hardware_interface::SystemInterface
++{
++public:
++  FairinoGripperHardwareInterface() = default;
++  ~FairinoGripperHardwareInterface() override;
++
++  hardware_interface::CallbackReturn on_init(
++    const hardware_interface::HardwareInfo & info) override;
++
++  std::vector<hardware_interface::StateInterface> export_state_interfaces() override;
++  std::vector<hardware_interface::CommandInterface> export_command_interfaces() override;
++
++  hardware_interface::CallbackReturn on_activate(
++    const rclcpp_lifecycle::State & previous_state) override;
++  hardware_interface::CallbackReturn on_deactivate(
++    const rclcpp_lifecycle::State & previous_state) override;
++
++  hardware_interface::return_type read(
++    const rclcpp::Time & time, const rclcpp::Duration & period) override;
++  hardware_interface::return_type write(
++    const rclcpp::Time & time, const rclcpp::Duration & period) override;
++
++private:
++  double joint_for_percent(std::uint8_t percent) const;
++  std::uint8_t percent_for_joint(double joint_position) const;
++  void disconnect();
++
++  std::vector<double> joint_position_state_;
++  std::vector<double> joint_velocity_state_;
++  std::vector<double> joint_position_command_;
++
++  std::string _controller_ip;
++  int _gripper_index = 1;
++  int _vel = 50;
++  int _force = 50;
++  int _maxtime = 30000;
++  int _block = 1;
++  int _open_pos = 0;
++  int _closed_pos = 100;
++  double _open_gap = 0.06;
++  double _finger_travel = 0.05;
++
++  std::unique_ptr<FRRobot> _ptr_robot;
++  bool _active = false;
++  double _last_command_percent = std::numeric_limits<double>::quiet_NaN();
++};
++
++}  // namespace fairino_hardware
++
++#endif  // FR_HARDWARE_GRIPPER_INTERFACE_
+diff --git a/fairino_hardware_v3_9_7/src/fairino_gripper_hardware_interface.cpp b/fairino_hardware_v3_9_7/src/fairino_gripper_hardware_interface.cpp
+new file mode 100644
+index 0000000..4444444
+--- /dev/null
++++ b/fairino_hardware_v3_9_7/src/fairino_gripper_hardware_interface.cpp
+@@ -0,0 +1,337 @@
++#include "fairino_hardware/fairino_gripper_hardware_interface.hpp"
++
++#include <algorithm>
++#include <chrono>
++#include <cmath>
++#include <cstdint>
++#include <stdexcept>
++
++#include "pluginlib/class_list_macros.hpp"
++
++namespace fairino_hardware
++{
++
++namespace
++{
++constexpr char kLogger[] = "FairinoGripperHardwareInterface";
++
++bool parse_int(
++  const std::string & value, int low, int high, int & output)
++{
++  try {
++    std::size_t used = 0;
++    const int parsed = std::stoi(value, &used);
++    if (used != value.size() || parsed < low || parsed > high) {
++      return false;
++    }
++    output = parsed;
++    return true;
++  } catch (...) {
++    return false;
++  }
++}
++
++bool parse_double(
++  const std::string & value, double low, double high, double & output)
++{
++  try {
++    std::size_t used = 0;
++    const double parsed = std::stod(value, &used);
++    if (used != value.size() || !std::isfinite(parsed) ||
++        parsed < low || parsed > high) {
++      return false;
++    }
++    output = parsed;
++    return true;
++  } catch (...) {
++    return false;
++  }
++}
++}  // namespace
++
++FairinoGripperHardwareInterface::~FairinoGripperHardwareInterface()
++{
++  try {
++    disconnect();
++  } catch (...) {
++    // Destructors must not throw.
++  }
++}
++
++hardware_interface::CallbackReturn FairinoGripperHardwareInterface::on_init(
++  const hardware_interface::HardwareInfo & info)
++{
++  if (hardware_interface::SystemInterface::on_init(info) !=
++      hardware_interface::CallbackReturn::SUCCESS) {
++    return hardware_interface::CallbackReturn::ERROR;
++  }
++
++  if (info_.joints.size() != 1) {
++    RCLCPP_ERROR(rclcpp::get_logger(kLogger),
++      "Fairino gripper hardware expects exactly one master finger joint");
++    return hardware_interface::CallbackReturn::ERROR;
++  }
++
++  for (const auto & joint : info_.joints) {
++    bool has_position_command = false;
++    bool has_position_state = false;
++    for (const auto & interface : joint.command_interfaces) {
++      if (interface.name == hardware_interface::HW_IF_POSITION) {
++        has_position_command = true;
++      }
++    }
++    for (const auto & interface : joint.state_interfaces) {
++      if (interface.name == hardware_interface::HW_IF_POSITION) {
++        has_position_state = true;
++      }
++    }
++    if (!has_position_command || !has_position_state) {
++      RCLCPP_ERROR(rclcpp::get_logger(kLogger),
++        "Gripper joint %s must expose position command and state interfaces",
++        joint.name.c_str());
++      return hardware_interface::CallbackReturn::ERROR;
++    }
++  }
++
++  const auto ip = info_.hardware_parameters.find("robot_ip");
++  if (ip == info_.hardware_parameters.end() || ip->second.empty()) {
++    RCLCPP_ERROR(rclcpp::get_logger(kLogger),
++      "Missing required gripper robot_ip parameter");
++    return hardware_interface::CallbackReturn::ERROR;
++  }
++  _controller_ip = ip->second;
++
++  const auto read_int_param = [&](const std::string & name,
++                                  int low, int high, int default_value) {
++    const auto it = info_.hardware_parameters.find(name);
++    if (it == info_.hardware_parameters.end() || it->second.empty()) {
++      return default_value;
++    }
++    int value = default_value;
++    if (!parse_int(it->second, low, high, value)) {
++      throw std::invalid_argument(name);
++    }
++    return value;
++  };
++
++  try {
++    _gripper_index = read_int_param("gripper_index", 1, 8, _gripper_index);
++    _vel = read_int_param("vel", 1, 100, _vel);
++    _force = read_int_param("force", 1, 100, _force);
++    _maxtime = read_int_param("maxtime", 1, 30000, _maxtime);
++    _block = read_int_param("block", 0, 1, _block);
++    _open_pos = read_int_param("open_pos", 0, 100, _open_pos);
++    _closed_pos = read_int_param("closed_pos", 0, 100, _closed_pos);
++
++    const auto read_double_param = [&](const std::string & name,
++                                       double low, double high,
++                                       double default_value) {
++      const auto it = info_.hardware_parameters.find(name);
++      if (it == info_.hardware_parameters.end() || it->second.empty()) {
++        return default_value;
++      }
++      double value = default_value;
++      if (!parse_double(it->second, low, high, value)) {
++        throw std::invalid_argument(name);
++      }
++      return value;
++    };
++    _open_gap = read_double_param("open_gap", 0.001, 0.10, _open_gap);
++    _finger_travel = read_double_param("finger_travel", 0.001, 0.10, _finger_travel);
++  } catch (const std::invalid_argument & error) {
++    RCLCPP_ERROR(rclcpp::get_logger(kLogger),
++      "Invalid gripper hardware parameter: %s", error.what());
++    return hardware_interface::CallbackReturn::ERROR;
++  }
++
++  if (_open_pos == _closed_pos) {
++    RCLCPP_ERROR(rclcpp::get_logger(kLogger),
++      "open_pos and closed_pos must differ");
++    return hardware_interface::CallbackReturn::ERROR;
++  }
++  if (_block != 1) {
++    RCLCPP_ERROR(rclcpp::get_logger(kLogger),
++      "block must be 1 (non-blocking) in the arm control loop");
++    return hardware_interface::CallbackReturn::ERROR;
++  }
++  if (_open_gap / 2.0 > _finger_travel) {
++    RCLCPP_ERROR(rclcpp::get_logger(kLogger),
++      "open_gap/2 must not exceed finger_travel");
++    return hardware_interface::CallbackReturn::ERROR;
++  }
++
++  joint_position_state_.assign(info_.joints.size(), 0.0);
++  joint_velocity_state_.assign(info_.joints.size(), 0.0);
++  joint_position_command_.assign(info_.joints.size(), 0.0);
++  return hardware_interface::CallbackReturn::SUCCESS;
++}
++
++std::vector<hardware_interface::StateInterface>
++FairinoGripperHardwareInterface::export_state_interfaces()
++{
++  std::vector<hardware_interface::StateInterface> interfaces;
++  for (std::size_t i = 0; i < info_.joints.size(); ++i) {
++    for (const auto & interface : info_.joints[i].state_interfaces) {
++      if (interface.name == hardware_interface::HW_IF_POSITION) {
++        interfaces.emplace_back(
++          info_.joints[i].name, hardware_interface::HW_IF_POSITION,
++          &joint_position_state_[i]);
++      } else if (interface.name == hardware_interface::HW_IF_VELOCITY) {
++        interfaces.emplace_back(
++          info_.joints[i].name, hardware_interface::HW_IF_VELOCITY,
++          &joint_velocity_state_[i]);
++      }
++    }
++  }
++  return interfaces;
++}
++
++std::vector<hardware_interface::CommandInterface>
++FairinoGripperHardwareInterface::export_command_interfaces()
++{
++  std::vector<hardware_interface::CommandInterface> interfaces;
++  for (std::size_t i = 0; i < info_.joints.size(); ++i) {
++    for (const auto & interface : info_.joints[i].command_interfaces) {
++      if (interface.name == hardware_interface::HW_IF_POSITION) {
++        interfaces.emplace_back(
++          info_.joints[i].name, hardware_interface::HW_IF_POSITION,
++          &joint_position_command_[i]);
++      }
++    }
++  }
++  return interfaces;
++}
++
++hardware_interface::CallbackReturn FairinoGripperHardwareInterface::on_activate(
++  const rclcpp_lifecycle::State & /*previous_state*/)
++{
++  disconnect();
++  _ptr_robot = std::make_unique<FRRobot>();
++  if (_ptr_robot->RPC(_controller_ip.c_str()) != 0) {
++    RCLCPP_ERROR(rclcpp::get_logger(kLogger),
++      "Failed to connect gripper hardware to %s", _controller_ip.c_str());
++    disconnect();
++    return hardware_interface::CallbackReturn::ERROR;
++  }
++
++  if (_ptr_robot->ActGripper(_gripper_index, 1) != 0) {
++    RCLCPP_ERROR(rclcpp::get_logger(kLogger),
++      "Failed to activate gripper index %d", _gripper_index);
++    disconnect();
++    return hardware_interface::CallbackReturn::ERROR;
++  }
++
++  rclcpp::sleep_for(std::chrono::milliseconds(100));
++  std::uint8_t percent = static_cast<std::uint8_t>(_open_pos);
++  std::uint16_t fault = 0;
++  if (_ptr_robot->GetGripperCurPosition(&fault, &percent) != 0 || fault != 0) {
++    RCLCPP_WARN(rclcpp::get_logger(kLogger),
++      "Could not read initial gripper position; assuming open_pos=%d", _open_pos);
++    percent = static_cast<std::uint8_t>(_open_pos);
++  }
++
++  const double position = joint_for_percent(percent);
++  for (std::size_t i = 0; i < info_.joints.size(); ++i) {
++    joint_position_state_[i] = position;
++    joint_position_command_[i] = position;
++    joint_velocity_state_[i] = 0.0;
++  }
++  _last_command_percent = percent;
++  _active = true;
++  return hardware_interface::CallbackReturn::SUCCESS;
++}
++
++hardware_interface::CallbackReturn FairinoGripperHardwareInterface::on_deactivate(
++  const rclcpp_lifecycle::State & /*previous_state*/)
++{
++  disconnect();
++  return hardware_interface::CallbackReturn::SUCCESS;
++}
++
++hardware_interface::return_type FairinoGripperHardwareInterface::read(
++  const rclcpp::Time & /*time*/, const rclcpp::Duration & period)
++{
++  if (!_active || !_ptr_robot) {
++    return hardware_interface::return_type::ERROR;
++  }
++
++  std::uint8_t percent = 0;
++  std::uint16_t fault = 0;
++  if (_ptr_robot->GetGripperCurPosition(&fault, &percent) != 0 || fault != 0) {
++    RCLCPP_ERROR_ONCE(rclcpp::get_logger(kLogger),
++      "Failed to read gripper position");
++    return hardware_interface::return_type::ERROR;
++  }
++
++  const double position = joint_for_percent(percent);
++  for (std::size_t i = 0; i < info_.joints.size(); ++i) {
++    const double dt = period.seconds();
++    joint_velocity_state_[i] = dt > 0.0 ? (position - joint_position_state_[i]) / dt : 0.0;
++    joint_position_state_[i] = position;
++  }
++  return hardware_interface::return_type::OK;
++}
++
++hardware_interface::return_type FairinoGripperHardwareInterface::write(
++  const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/)
++{
++  if (!_active || !_ptr_robot) {
++    return hardware_interface::return_type::ERROR;
++  }
++  for (double command : joint_position_command_) {
++    if (!std::isfinite(command)) {
++      return hardware_interface::return_type::ERROR;
++    }
++  }
++
++  const std::uint8_t percent = percent_for_joint(joint_position_command_[0]);
++  if (!std::isfinite(_last_command_percent) ||
++      std::abs(static_cast<double>(percent) - _last_command_percent) > 0.5) {
++    const int code = _ptr_robot->MoveGripper(
++      _gripper_index, percent, _vel, _force, _maxtime,
++      static_cast<std::uint8_t>(_block), 0, 0.0, 0, 0);
++    if (code != 0) {
++      RCLCPP_ERROR_ONCE(rclcpp::get_logger(kLogger),
++        "MoveGripper failed with code %d", code);
++      return hardware_interface::return_type::ERROR;
++    }
++    _last_command_percent = percent;
++  }
++  return hardware_interface::return_type::OK;
++}
++
++void FairinoGripperHardwareInterface::disconnect()
++{
++  if (_ptr_robot) {
++    _ptr_robot->CloseRPC();
++    _ptr_robot.reset();
++  }
++  _active = false;
++  _last_command_percent = std::numeric_limits<double>::quiet_NaN();
++}
++
++double FairinoGripperHardwareInterface::joint_for_percent(
++  std::uint8_t percent) const
++{
++  const double p = std::clamp(static_cast<double>(percent), 0.0, 100.0);
++  const double ratio = std::clamp(
++    (p - _open_pos) / static_cast<double>(_closed_pos - _open_pos),
++    0.0, 1.0);
++  return (_open_gap / 2.0) * (1.0 - ratio);
++}
++
++std::uint8_t FairinoGripperHardwareInterface::percent_for_joint(
++  double joint_position) const
++{
++  const double ratio = 1.0 - std::clamp(
++    joint_position / (_open_gap / 2.0), 0.0, 1.0);
++  const double p = std::clamp(
++    _open_pos + ratio * (_closed_pos - _open_pos), 0.0, 100.0);
++  return static_cast<std::uint8_t>(std::lround(p));
++}
++
++}  // namespace fairino_hardware
++
++PLUGINLIB_EXPORT_CLASS(
++  fairino_hardware::FairinoGripperHardwareInterface,
++  hardware_interface::SystemInterface)

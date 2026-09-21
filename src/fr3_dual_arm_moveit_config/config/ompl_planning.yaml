@@ -1,0 +1,14 @@
+left_arm:
+  planner_configs:
+    - RRTConnectkConfigDefault
+  longest_valid_segment_fraction: 0.005
+
+right_arm:
+  planner_configs:
+    - RRTConnectkConfigDefault
+  longest_valid_segment_fraction: 0.005
+
+both_arms:
+  planner_configs:
+    - RRTConnectkConfigDefault
+  longest_valid_segment_fraction: 0.005

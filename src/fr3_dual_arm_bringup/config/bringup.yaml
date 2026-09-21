@@ -1,0 +1,5 @@
+enable_execution: false
+rviz: true
+gui: true
+panel: true
+ros_domain_id: 31

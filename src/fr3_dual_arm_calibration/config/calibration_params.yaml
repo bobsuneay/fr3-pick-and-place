@@ -1,0 +1,10 @@
+calibration_base_frame: world
+head_camera:
+  optical_frame: head_camera_optical_frame
+  topic: /head_camera/camera_info
+left_d435i:
+  optical_frame: left_d435i_optical_frame
+  topic: /left_d435i/camera_info
+right_d435i:
+  optical_frame: right_d435i_optical_frame
+  topic: /right_d435i/camera_info

@@ -1,0 +1,17 @@
+initial_positions:
+  left_j1: 0.0175
+  left_j2: -1.0472
+  left_j3: 1.5533
+  left_j4: -0.8727
+  left_j5: -0.7854
+  left_j6: -0.5760
+  right_j1: -1.6057
+  right_j2: -2.2864
+  right_j3: -1.3963
+  right_j4: -2.4958
+  right_j5: 0.6458
+  right_j6: -1.5533
+  left_left_finger_joint: 0.03
+  left_right_finger_joint: 0.03
+  right_left_finger_joint: 0.03
+  right_right_finger_joint: 0.03

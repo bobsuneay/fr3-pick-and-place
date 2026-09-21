@@ -1,0 +1,10 @@
+<library path="fr3_dual_arm_hardware">
+  <class
+    name="fr3_dual_arm_hardware/Fr3DualArmHardwareInterface"
+    type="fr3_dual_arm_hardware::Fr3DualArmHardwareInterface"
+    base_class_type="hardware_interface::SystemInterface">
+    <description>
+      Dual-arm FAIRINO FR3 and HKV gripper hardware interface adapter.
+    </description>
+  </class>
+</library>

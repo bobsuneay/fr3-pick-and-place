@@ -1,0 +1,346 @@
+--- a/fairino_hardware_v3_9_7/include/fairino_hardware/fairino_gripper_hardware_interface.hpp
++++ b/fairino_hardware_v3_9_7/include/fairino_hardware/fairino_gripper_hardware_interface.hpp
+@@ -12,7 +12,7 @@
+ #include "hardware_interface/types/hardware_interface_return_values.hpp"
+ #include "hardware_interface/types/hardware_interface_type_values.hpp"
+ #include "rclcpp/rclcpp.hpp"
+-#include "libfairino/include/robot.h"
++#include "shared_robot_connection.hpp"
+ 
+ namespace fairino_hardware
+ {
+@@ -59,7 +59,7 @@
+   double _open_gap = 0.06;
+   double _finger_travel = 0.05;
+ 
+-  std::unique_ptr<FRRobot> _ptr_robot;
++  std::shared_ptr<SharedRobotConnection> _ptr_robot;
+   bool _active = false;
+   double _last_command_percent = std::numeric_limits<double>::quiet_NaN();
+ };
+--- a/fairino_hardware_v3_9_7/include/fairino_hardware/fairino_hardware_interface.hpp
++++ b/fairino_hardware_v3_9_7/include/fairino_hardware/fairino_hardware_interface.hpp
+@@ -9,6 +9,6 @@
+ #include "hardware_interface/types/hardware_interface_type_values.hpp"
+ #include "visibility_control.h"
+ #include <vector>
+-#include "libfairino/include/robot.h"
++#include "shared_robot_connection.hpp"
+ 
+ 
+@@ -20,6 +20,8 @@
+ class FairinoHardwareInterface: public hardware_interface::SystemInterface{
+ public:
+   RCLCPP_SHARED_PTR_DEFINITIONS(FairinoHardwareInterface)
++
++  ~FairinoHardwareInterface() override;
+ 
+   FAIRINO_HARDWARE_PUBLIC
+   hardware_interface::CallbackReturn on_init(const hardware_interface::HardwareInfo& info) override;
+@@ -61,7 +63,7 @@
+   double _jnt_torque_state[6];
+   int _control_mode;
+   std::string _controller_ip = CONTROLLER_IP_ADDRESS;
+-  std::unique_ptr<FRRobot> _ptr_robot;
++  std::shared_ptr<SharedRobotConnection> _ptr_robot;
+ };
+ 
+ } //end namespace
+--- /dev/null
++++ b/fairino_hardware_v3_9_7/include/fairino_hardware/shared_robot_connection.hpp
+@@ -0,0 +1,49 @@
++#pragma once
++
++#include <memory>
++#include <mutex>
++#include <stdexcept>
++#include <string>
++#include "libfairino/include/robot.h"
++
++namespace fairino_hardware
++{
++// Both plugins are built into libfairino_hardware. This inline function's
++// static registry is shared across their translation units, not across processes.
++// The launch file must continue to use one process per robot controller.
++struct SharedRobotConnection
++{
++    FRRobot robot;
++    std::mutex mutex;
++    std::string ip;
++
++    explicit SharedRobotConnection(const std::string & address) : ip(address) {}
++    ~SharedRobotConnection()
++    {
++        try { robot.CloseRPC(); } catch (...) { /* Never throw from cleanup. */ }
++    }
++};
++
++inline std::shared_ptr<SharedRobotConnection> acquire_robot_connection(
++    const std::string & ip)
++{
++    static std::mutex registry_mutex;
++    static std::weak_ptr<SharedRobotConnection> registry;
++    std::lock_guard<std::mutex> lock(registry_mutex);
++    if (auto current = registry.lock()) {
++        if (current->ip != ip) {
++            throw std::runtime_error(
++                "Different robot IPs in one SDK process; use one controller_manager per arm");
++        }
++        return current;
++    }
++    if (ip.empty()) throw std::runtime_error("Missing robot_ip");
++    auto connection = std::make_shared<SharedRobotConnection>(ip);
++    const int code = connection->robot.RPC(ip.c_str());
++    if (code != 0) {
++        throw std::runtime_error("RPC(" + ip + ") failed, code=" + std::to_string(code));
++    }
++    registry = connection;
++    return connection;
++}
++}  // namespace fairino_hardware
+--- a/fairino_hardware_v3_9_7/src/fairino_gripper_hardware_interface.cpp
++++ b/fairino_hardware_v3_9_7/src/fairino_gripper_hardware_interface.cpp
+@@ -206,15 +206,21 @@
+   const rclcpp_lifecycle::State & /*previous_state*/)
+ {
+   disconnect();
+-  _ptr_robot = std::make_unique<FRRobot>();
+-  if (_ptr_robot->RPC(_controller_ip.c_str()) != 0) {
+-    RCLCPP_ERROR(rclcpp::get_logger(kLogger),
+-      "Failed to connect gripper hardware to %s", _controller_ip.c_str());
+-    disconnect();
+-    return hardware_interface::CallbackReturn::ERROR;
+-  }
+-
+-  if (_ptr_robot->ActGripper(_gripper_index, 1) != 0) {
++  // shared_robot_connection_v1: either plugin may be activated first.
++  try {
++    _ptr_robot = acquire_robot_connection(_controller_ip);
++  } catch (const std::exception & error) {
++    RCLCPP_ERROR(rclcpp::get_logger(kLogger),
++      "Shared SDK connection failed: %s", error.what());
++    return hardware_interface::CallbackReturn::ERROR;
++  }
++  // Keep a local lease until the lock is released, including error paths.
++  const auto connection = _ptr_robot;
++  std::lock_guard<std::mutex> sdk_lock(connection->mutex);
++  RCLCPP_INFO(rclcpp::get_logger(kLogger),
++    "Gripper using shared SDK connection: %s", _controller_ip.c_str());
++
++  if (_ptr_robot->robot.ActGripper(_gripper_index, 1) != 0) {
+     RCLCPP_ERROR(rclcpp::get_logger(kLogger),
+       "Failed to activate gripper index %d", _gripper_index);
+     disconnect();
+@@ -224,10 +230,12 @@
+   rclcpp::sleep_for(std::chrono::milliseconds(100));
+   std::uint8_t percent = static_cast<std::uint8_t>(_open_pos);
+   std::uint16_t fault = 0;
+-  if (_ptr_robot->GetGripperCurPosition(&fault, &percent) != 0 || fault != 0) {
+-    RCLCPP_WARN(rclcpp::get_logger(kLogger),
+-      "Could not read initial gripper position; assuming open_pos=%d", _open_pos);
+-    percent = static_cast<std::uint8_t>(_open_pos);
++  if (_ptr_robot->robot.GetGripperCurPosition(&fault, &percent) != 0 ||
++      fault != 0 || percent > 100) {
++    RCLCPP_ERROR(rclcpp::get_logger(kLogger),
++      "Cannot initialize gripper from real feedback (fault=%u)", fault);
++    disconnect();
++    return hardware_interface::CallbackReturn::ERROR;
+   }
+ 
+   const double position = joint_for_percent(percent);
+@@ -255,9 +263,10 @@
+     return hardware_interface::return_type::ERROR;
+   }
+ 
++  std::lock_guard<std::mutex> sdk_lock(_ptr_robot->mutex);
+   std::uint8_t percent = 0;
+   std::uint16_t fault = 0;
+-  if (_ptr_robot->GetGripperCurPosition(&fault, &percent) != 0 || fault != 0) {
++  if (_ptr_robot->robot.GetGripperCurPosition(&fault, &percent) != 0 || fault != 0 || percent > 100) {
+     RCLCPP_ERROR_ONCE(rclcpp::get_logger(kLogger),
+       "Failed to read gripper position");
+     return hardware_interface::return_type::ERROR;
+@@ -277,6 +286,12 @@
+   if (!_active || !_ptr_robot) {
+     return hardware_interface::return_type::ERROR;
+   }
++  std::lock_guard<std::mutex> sdk_lock(_ptr_robot->mutex);
++  // Reject out-of-range requests instead of silently commanding an endpoint.
++  if (joint_position_command_[0] < 0.0 ||
++      joint_position_command_[0] > _open_gap / 2.0) {
++    return hardware_interface::return_type::ERROR;
++  }
+   for (double command : joint_position_command_) {
+     if (!std::isfinite(command)) {
+       return hardware_interface::return_type::ERROR;
+@@ -286,7 +296,7 @@
+   const std::uint8_t percent = percent_for_joint(joint_position_command_[0]);
+   if (!std::isfinite(_last_command_percent) ||
+       std::abs(static_cast<double>(percent) - _last_command_percent) > 0.5) {
+-    const int code = _ptr_robot->MoveGripper(
++    const int code = _ptr_robot->robot.MoveGripper(
+       _gripper_index, percent, _vel, _force, _maxtime,
+       static_cast<std::uint8_t>(_block), 0, 0.0, 0, 0);
+     if (code != 0) {
+@@ -302,8 +312,7 @@
+ void FairinoGripperHardwareInterface::disconnect()
+ {
+   if (_ptr_robot) {
+-    _ptr_robot->CloseRPC();
+-    _ptr_robot.reset();
++    _ptr_robot.reset(); // The arm may still be using the shared connection.
+   }
+   _active = false;
+   _last_command_percent = std::numeric_limits<double>::quiet_NaN();
+--- a/fairino_hardware_v3_9_7/src/fairino_hardware_interface.cpp
++++ b/fairino_hardware_v3_9_7/src/fairino_hardware_interface.cpp
+@@ -1,12 +1,26 @@
+ #include "fairino_hardware/fairino_hardware_interface.hpp"
++#include <algorithm>
++#include <cmath>
+ 
+ namespace fairino_hardware{
++
++FairinoHardwareInterface::~FairinoHardwareInterface()
++{
++    // Session destruction closes RPC only after BOTH plugins release it.
++    _ptr_robot.reset();
++}
++
+ 
+ hardware_interface::CallbackReturn FairinoHardwareInterface::on_init(const hardware_interface::HardwareInfo& sysinfo){
+     if (hardware_interface::SystemInterface::on_init(sysinfo) != hardware_interface::CallbackReturn::SUCCESS) {
+         return hardware_interface::CallbackReturn::ERROR;
+     }
+     info_ = sysinfo;//info_是父类中定义的变量
++    if (info_.joints.size() != 6) {
++        RCLCPP_ERROR(rclcpp::get_logger("FairinoHardwareInterface"),
++                    "Arm hardware expects exactly 6 joints; use the gripper plugin for fingers");
++        return hardware_interface::CallbackReturn::ERROR;
++    }
+     // Read this instance's controller IP from the URDF
+     // <hardware><param name="robot_ip">...</param></hardware>.
+     auto robot_ip = info_.hardware_parameters.find("robot_ip");
+@@ -116,7 +130,17 @@
+     using namespace std::chrono_literals;
+     RCLCPP_INFO(rclcpp::get_logger("FairinoHardwareInterface"), "Starting ...please wait...");
+     //做变量的初始化工作
+-    _ptr_robot = std::make_unique<FRRobot>();//创建机器人实例
++    // shared_robot_connection_v1: the gripper may activate before the arm.
++    _ptr_robot.reset();
++    std::shared_ptr<SharedRobotConnection> connection;
++    try {
++        connection = acquire_robot_connection(_controller_ip);
++    } catch (const std::exception & error) {
++        RCLCPP_ERROR(rclcpp::get_logger("FairinoHardwareInterface"),
++                    "Shared SDK connection failed: %s", error.what());
++        return hardware_interface::CallbackReturn::ERROR;
++    }
++    std::lock_guard<std::mutex> sdk_lock(connection->mutex);
+     for(int i=0;i<6;i++){//初始化变量
+         _jnt_position_command[i] = 0;
+         _jnt_velocity_command[i] = 0;
+@@ -126,27 +150,26 @@
+         _jnt_torque_state[i] = 0;
+     }
+     _control_mode = 0;//默认是位置控制,0-位置控制，1-扭矩控制 2-速度控制
+-    errno_t returncode = _ptr_robot->RPC(_controller_ip.c_str());//建立xmlrpc连接
+-    rclcpp::sleep_for(200ms);//等待一段时间让控制器的rpc连接建立完毕
+-    if(returncode != 0){
+-        RCLCPP_INFO(rclcpp::get_logger("FairinoHardwareInterface"), "机械臂SDK连接失败！请检查端口时候被占用");
+-        return hardware_interface::CallbackReturn::ERROR;
+-    }else{
+-        RCLCPP_INFO(rclcpp::get_logger("FairinoHardwareInterface"), "机械臂SDK连接成功！");
+-    }
+-    //做第一步的工作，读取当前状态数据
++    RCLCPP_INFO(rclcpp::get_logger("FairinoHardwareInterface"),
++                "Arm using shared SDK connection: %s", _controller_ip.c_str());
++    rclcpp::sleep_for(200ms);
+     JointPos jntpos;
+-    returncode = _ptr_robot->GetActualJointPosDegree(0,&jntpos);
++    const errno_t returncode = connection->robot.GetActualJointPosDegree(0, &jntpos);
+     /*
+     获取反馈位置后同步到指令位置以维持当前状态，如果发现读取失败，那么就无法激活插件，
+     因为错误的反馈位置会导致初始指令位置下发出现严重偏差导致事故
+     */
+     if(returncode == 0){
+         for(int j=0;j<6;j++){
+-            _jnt_position_command[j] = jntpos.jPos[j]/180.0*M_PI;
++            if (!std::isfinite(jntpos.jPos[j])) {
++                return hardware_interface::CallbackReturn::ERROR;
++            }
++            _jnt_position_state[j] = jntpos.jPos[j]/180.0*M_PI;
++            _jnt_position_command[j] = _jnt_position_state[j];
+         }
+         RCLCPP_INFO(rclcpp::get_logger("FairinoHardwareInterface"),"初始指令位置: %f,%f,%f,%f,%f,%f",_jnt_position_command[0],\
+         _jnt_position_command[1],_jnt_position_command[2],_jnt_position_command[3],_jnt_position_command[4],_jnt_position_command[5]);    
++        _ptr_robot = connection; // Publish the lease only after valid initial feedback.
+         RCLCPP_INFO(rclcpp::get_logger("FairinoHardwareInterface"), "机械臂硬件启动成功!");
+         return hardware_interface::CallbackReturn::SUCCESS;
+     }else{
+@@ -160,9 +183,13 @@
+ hardware_interface::CallbackReturn FairinoHardwareInterface::on_deactivate(const rclcpp_lifecycle::State& previous_state)
+ {
+     RCLCPP_INFO(rclcpp::get_logger("FairinoHardwareInterface"), "Stopping ...please wait...");
+-    _ptr_robot->StopMotion();//停止机器人
+-    _ptr_robot->CloseRPC();//销毁实例，连接断开
+-    _ptr_robot.release();
++    if (_ptr_robot) {
++        {
++            std::lock_guard<std::mutex> sdk_lock(_ptr_robot->mutex);
++            _ptr_robot->robot.StopMotion();
++        }
++        _ptr_robot.reset(); // Do not close a connection still used by the gripper.
++    }
+     RCLCPP_INFO(rclcpp::get_logger("FairinoHardwareInterface"), "System successfully stopped!");
+     return hardware_interface::CallbackReturn::SUCCESS;
+ }
+@@ -171,15 +198,18 @@
+ 
+ hardware_interface::return_type FairinoHardwareInterface::read(const rclcpp::Time& time,const rclcpp::Duration& period)
+ {//从RTDE反馈数据中获取所需的位置，速度和扭矩信息
++    if (!_ptr_robot) return hardware_interface::return_type::ERROR;
++    std::lock_guard<std::mutex> sdk_lock(_ptr_robot->mutex);
+     JointPos state_data;
+-    error_t returncode = _ptr_robot->GetActualJointPosDegree(1,&state_data);
++    errno_t returncode = _ptr_robot->robot.GetActualJointPosDegree(1,&state_data);
+     if(returncode == 0){
+         for(int i=0;i<6;i++){
++            if (!std::isfinite(state_data.jPos[i])) return hardware_interface::return_type::ERROR;
+             _jnt_position_state[i] = state_data.jPos[i]/180.0*M_PI;//注意单位转换，moveit统一用弧度
+             //_jnt_torque_state[i] = state_data.jt_cur_tor[i];//注意单位转换
+         }
+     }else{
+-        hardware_interface::return_type::ERROR;
++        return hardware_interface::return_type::ERROR;
+     }
+     //RCLCPP_INFO(rclcpp::get_logger("FairinoHardwareInterface"), "System successfully read: %f,%f,%f,%f,%f,%f",_jnt_position_state[0],\
+     _jnt_position_state[1],_jnt_position_state[2],_jnt_position_state[3],_jnt_position_state[4],_jnt_position_state[5]);
+@@ -190,8 +220,10 @@
+ 
+ hardware_interface::return_type FairinoHardwareInterface::write(const rclcpp::Time& time,const rclcpp::Duration& period)
+ {
++    if (!_ptr_robot) return hardware_interface::return_type::ERROR;
++    std::lock_guard<std::mutex> sdk_lock(_ptr_robot->mutex);
+     if(_control_mode == 0){//位置控制模式
+-        if (std::any_of(&_jnt_position_command[0], &_jnt_position_command[5],\
++        if (std::any_of(&_jnt_position_command[0], &_jnt_position_command[6],\
+             [](double c) { return not std::isfinite(c); })) {
+             return hardware_interface::return_type::ERROR;
+         }
+@@ -202,12 +234,13 @@
+         }
+         //RCLCPP_INFO(rclcpp::get_logger("FairinoHardwareInterface"), "ServoJ下发位置:%f,%f,%f,%f,%f,%f",\
+             cmd.jPos[0],cmd.jPos[1],cmd.jPos[2],cmd.jPos[3],cmd.jPos[4],cmd.jPos[5]);
+-        int returncode = _ptr_robot->ServoJ(&cmd,&extcmd,0,0,0.008,0,0);
++        int returncode = _ptr_robot->robot.ServoJ(&cmd,&extcmd,0,0,0.008,0,0);
+         if(returncode != 0){
+             RCLCPP_INFO(rclcpp::get_logger("FairinoHardwareInterface"), "ServoJ指令下发错误,错误码:%d",returncode);
++            return hardware_interface::return_type::ERROR;
+         }
+     }else if(_control_mode == 1){//扭矩控制模式
+-        if (std::any_of(&_jnt_torque_command[0], &_jnt_torque_command[5],\
++        if (std::any_of(&_jnt_torque_command[0], &_jnt_torque_command[6],\
+             [](double c) { return not std::isfinite(c); })) {
+             return hardware_interface::return_type::ERROR;
+         }

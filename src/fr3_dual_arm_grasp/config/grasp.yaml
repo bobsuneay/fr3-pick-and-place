@@ -1,0 +1,90 @@
+first_arm: right
+cloud_topic: /head_camera/points
+point_cloud_camera: head_camera
+cloud_timeout: 15.0
+max_data_age: 2.0
+roi_min: [0.42, -0.28, 0.751]
+roi_max: [0.58, -0.12, 0.778]
+table_z: 0.75
+cluster_radius: 0.003
+min_points: 20
+max_points: 30000
+bolt_length: 0.045
+shaft_radius: 0.006
+head_radius: 0.009
+head_length: 0.008
+grasp_offset: 0.010
+fingertip_table_clearance: 0.005
+open_width: 0.035
+close_width: 0.004
+finger_max_force: 4.0
+finger_max_speed: 0.006
+approach_height: 0.05
+retry_lift_height: 0.02
+grasp_reach_tolerance: 0.001
+grasp_recovery_max: 0.025
+lift_height: 0.05
+grasp_test_lift: 0.015
+max_grasp_attempts: 5
+cartesian_step: 0.003
+descent_speed: 0.008
+transfer_speed: 0.025
+scan_speed: 0.030
+scan_joint_speed: 0.24
+scan_joint_acceleration: 0.60
+joint_speed: 0.12
+joint_acceleration: 0.15
+joint_step_limit: 0.20
+inspection_center: [0.25, 0.0, 1.15]
+handover_center: [0.35, 0.0, 1.00]
+handover_assist: true
+handover_donor_candidates:
+  - {roll_deg: 90, offset: [0.0, 0.0, 0.0]}
+  - {roll_deg: -90, offset: [0.0, 0.0, 0.0]}
+  - {roll_deg: 0, offset: [0.0, 0.0, 0.0]}
+  - {roll_deg: 60, offset: [0.03, 0.03, 0.0]}
+  - {roll_deg: 120, offset: [0.03, 0.03, 0.0]}
+  - {roll_deg: 90, offset: [0.03, 0.03, -0.03]}
+views_deg: [[0, 0, 0], [0, 0, -30], [0, 15, 0], [0, -15, 0], [0, 35, 0], [0, -35, 0], [15, 0, 0], [-15, 0, 0], [60, 0, 0], [-60, 0, 0], [120, 0, 0], [-120, 0, 0], [180, 0, 0], [0, 0, 60], [0, 0, -60], [0, 0, 120], [0, 0, -120], [0, 0, 180]]
+minimum_views: 3
+settle_seconds: 0.8
+center_tolerance: 0.003
+angular_tolerance: 0.12
+output_directory: ~/fr3_inspection_runs
+simulation_entity: bolt_00_00
+random_position_center: [0.50, -0.20]
+random_position_radius: 0.05
+cameras:
+  waist_camera:
+    parent: support_link
+    xyz: [0.105, 0.0, 1.22]
+    rpy: [0.0, 0.401, 0.0]
+    width: 1280
+    height: 720
+    horizontal_fov: 1.211
+    near: 0.10
+    far: 2.0
+    rate: 10.0
+    depth: false
+  left_d435i:
+    parent: left_gripper_palm
+    xyz: [0.0, 0.080, 0.020]
+    rpy: [0.0, -1.016, -1.5707963267948966]
+    width: 640
+    height: 480
+    horizontal_fov: 1.518
+    near: 0.10
+    far: 2.0
+    rate: 10.0
+    depth: true
+  right_d435i:
+    parent: right_gripper_palm
+    xyz: [0.0, 0.080, 0.020]
+    rpy: [0.0, -1.016, -1.5707963267948966]
+    width: 640
+    height: 480
+    horizontal_fov: 1.518
+    near: 0.10
+    far: 2.0
+    rate: 10.0
+    depth: true
