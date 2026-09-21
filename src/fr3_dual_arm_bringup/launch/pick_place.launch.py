@@ -25,6 +25,7 @@ def start(context):
                                  launch_arguments=arguments.items()),
         Node(package='fr3_dual_arm_grasp', executable='teach_ui' if arg('gui') == 'true' else 'grasp_node',
              output='screen', parameters=[{
+                 'mode': mode, 'hardware': arg('hardware'),
                  'arms_file': arg('arms'), 'scene_file': arg('scene'),
                  'demo_config': arg('demo_config'), 'points_file': arg('points'),
                  'enable_execution': ParameterValue(LaunchConfiguration('enable_execution'), value_type=bool),

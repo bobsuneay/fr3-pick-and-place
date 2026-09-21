@@ -6,6 +6,7 @@
   <maintainer email="maintainer@example.com">FR3 dual-arm maintainer</maintainer>
   <license>MIT</license>
 
+  <exec_depend>controller_manager_msgs</exec_depend>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>sensor_msgs_py</exec_depend>

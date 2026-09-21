@@ -19,7 +19,7 @@ def run(argv, **kwargs):
 def patch_command(executable, root, patch_file, *, reverse=False, dry=True):
     command = [executable, '--batch', '--fuzz=0', '-p1', '-i', patch_file]
     if reverse:
-        command.append('-R')
+        command.extend(['--forward', '-R'])
     else:
         command.append('--forward')
     if dry:
@@ -64,6 +64,9 @@ def main():
             after = {p.relative_to(package): p.read_bytes() for p in package.rglob('*') if p.is_file()}
             assert before == after, 'Repeat installer invocation changed the source'
             print('PASS: installer applies all patches and is idempotent')
+        teaching = patches / 'fairino_teach_mode.patch'
+        if patch_command(args.patch, root, teaching, reverse=True).returncode == 0:
+            assert patch_command(args.patch, root, teaching, reverse=True, dry=False).returncode == 0
         already_shared = patch_command(args.patch, root, shared, reverse=True)
         if already_shared.returncode != 0:
             for name in ['fairino_dual_arm_ip.patch', 'fairino_gripper_interface.patch',
@@ -103,7 +106,7 @@ def main():
                     assert result.returncode == 0, result.stdout.decode(errors='replace')
                 result = subprocess.run(shell[:-1] + [scenario_root.as_posix()], capture_output=True)
                 assert result.returncode == 0, result.stdout.decode(errors='replace')
-                assert patch_command(args.patch, scenario_root, shared, reverse=True).returncode == 0
+                assert patch_command(args.patch, scenario_root, teaching, reverse=True).returncode == 0
                 print('PASS: installer scenario', scenario)
 
             # Deliberately incompatible source: preflight must leave it untouched.
@@ -121,6 +124,9 @@ def main():
             assert result.returncode != 0 and before == after
             print('PASS: incompatible source is rejected without modifying original files')
 
+        teaching = patches / 'fairino_teach_mode.patch'
+        result = patch_command(args.patch, root, teaching, dry=False)
+        assert result.returncode == 0, result.stdout.decode(errors='replace')
         sources = [package / 'src/fairino_hardware_interface.cpp',
                    package / 'src/fairino_gripper_hardware_interface.cpp']
         flags = [args.cxx, '-std=c++17', '-D_USE_MATH_DEFINES', '-pthread']

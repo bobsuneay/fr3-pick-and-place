@@ -1,0 +1,153 @@
+--- a/fairino_hardware_v3_9_7/include/fairino_hardware/fairino_hardware_interface.hpp
++++ b/fairino_hardware_v3_9_7/include/fairino_hardware/fairino_hardware_interface.hpp
+@@ -54,7 +54,11 @@
+   FAIRINO_HARDWARE_PUBLIC
+   hardware_interface::return_type write(const rclcpp::Time & time, const rclcpp::Duration & period) override;
+   
++  hardware_interface::return_type perform_command_mode_switch(
++    const std::vector<std::string> & start_interfaces,
++    const std::vector<std::string> & stop_interfaces) override;
+ private:
++  bool command_claimed_ = false;
+   double _jnt_position_command[6];
+   double _jnt_velocity_command[6];
+   double _jnt_torque_command[6];
+--- a/fairino_hardware_v3_9_7/src/fairino_hardware_interface.cpp
++++ b/fairino_hardware_v3_9_7/src/fairino_hardware_interface.cpp
+@@ -127,6 +127,7 @@
+ 
+ hardware_interface::CallbackReturn FairinoHardwareInterface::on_activate(const rclcpp_lifecycle::State& previous_state)
+ {
++    command_claimed_ = false;
+     using namespace std::chrono_literals;
+     RCLCPP_INFO(rclcpp::get_logger("FairinoHardwareInterface"), "Starting ...please wait...");
+     //做变量的初始化工作
+@@ -205,7 +206,8 @@
+     if(returncode == 0){
+         for(int i=0;i<6;i++){
+             if (!std::isfinite(state_data.jPos[i])) return hardware_interface::return_type::ERROR;
+-            _jnt_position_state[i] = state_data.jPos[i]/180.0*M_PI;//注意单位转换，moveit统一用弧度
++            _jnt_position_state[i] = state_data.jPos[i]/180.0*M_PI;
++            if (!command_claimed_) _jnt_position_command[i] = _jnt_position_state[i];//注意单位转换，moveit统一用弧度
+             //_jnt_torque_state[i] = state_data.jt_cur_tor[i];//注意单位转换
+         }
+     }else{
+@@ -218,8 +220,39 @@
+ 
+ }
+ 
++hardware_interface::return_type FairinoHardwareInterface::perform_command_mode_switch(
++    const std::vector<std::string> & start_interfaces,
++    const std::vector<std::string> & stop_interfaces)
++{
++    // All hardware components see all keys; only react to our own joints.
++    for (const auto & joint : info_.joints) {
++        const auto key = joint.name + "/position";
++        if (std::find(stop_interfaces.begin(), stop_interfaces.end(), key) != stop_interfaces.end())
++            command_claimed_ = false;
++    }
++    std::size_t starting = 0;
++    for (const auto & joint : info_.joints) {
++        const auto key = joint.name + "/position";
++        if (std::find(start_interfaces.begin(), start_interfaces.end(), key) != start_interfaces.end())
++            ++starting;
++    }
++    if (starting && starting != 6) return hardware_interface::return_type::ERROR;
++    if (starting) {
++        // Reseed commands after hand-guiding; never replay the pre-teach target.
++        for (std::size_t i = 0; i < 6; ++i) {
++            if (!std::isfinite(_jnt_position_state[i])) return hardware_interface::return_type::ERROR;
++            _jnt_position_command[i] = _jnt_position_state[i];
++        }
++        command_claimed_ = true;
++    }
++    return hardware_interface::return_type::OK;
++}
++
+ hardware_interface::return_type FairinoHardwareInterface::write(const rclcpp::Time& time,const rclcpp::Duration& period)
+ {
++    if (!_ptr_robot) return hardware_interface::return_type::ERROR;
++    if (!command_claimed_) return hardware_interface::return_type::OK;
++
+     if (!_ptr_robot) return hardware_interface::return_type::ERROR;
+     std::lock_guard<std::mutex> sdk_lock(_ptr_robot->mutex);
+     if(_control_mode == 0){//位置控制模式
+--- a/fairino_hardware_v3_9_7/include/fairino_hardware/fairino_gripper_hardware_interface.hpp
++++ b/fairino_hardware_v3_9_7/include/fairino_hardware/fairino_gripper_hardware_interface.hpp
+@@ -39,7 +39,11 @@
+   hardware_interface::return_type write(
+     const rclcpp::Time & time, const rclcpp::Duration & period) override;
+ 
++  hardware_interface::return_type perform_command_mode_switch(
++    const std::vector<std::string> & start_interfaces,
++    const std::vector<std::string> & stop_interfaces) override;
+ private:
++  bool command_claimed_ = false;
+   double joint_for_percent(std::uint8_t percent) const;
+   std::uint8_t percent_for_joint(double joint_position) const;
+   void disconnect();
+--- a/fairino_hardware_v3_9_7/src/fairino_gripper_hardware_interface.cpp
++++ b/fairino_hardware_v3_9_7/src/fairino_gripper_hardware_interface.cpp
+@@ -205,6 +205,7 @@
+ hardware_interface::CallbackReturn FairinoGripperHardwareInterface::on_activate(
+   const rclcpp_lifecycle::State & /*previous_state*/)
+ {
++    command_claimed_ = false;
+   disconnect();
+   // shared_robot_connection_v1: either plugin may be activated first.
+   try {
+@@ -241,6 +242,7 @@
+   const double position = joint_for_percent(percent);
+   for (std::size_t i = 0; i < info_.joints.size(); ++i) {
+     joint_position_state_[i] = position;
++    if (!command_claimed_) joint_position_command_[i] = position;
+     joint_position_command_[i] = position;
+     joint_velocity_state_[i] = 0.0;
+   }
+@@ -277,13 +279,46 @@
+     const double dt = period.seconds();
+     joint_velocity_state_[i] = dt > 0.0 ? (position - joint_position_state_[i]) / dt : 0.0;
+     joint_position_state_[i] = position;
++    if (!command_claimed_) joint_position_command_[i] = position;
+   }
+   return hardware_interface::return_type::OK;
++}
++
++hardware_interface::return_type FairinoGripperHardwareInterface::perform_command_mode_switch(
++    const std::vector<std::string> & start_interfaces,
++    const std::vector<std::string> & stop_interfaces)
++{
++    // All hardware components see all keys; only react to our own joints.
++    for (const auto & joint : info_.joints) {
++        const auto key = joint.name + "/position";
++        if (std::find(stop_interfaces.begin(), stop_interfaces.end(), key) != stop_interfaces.end())
++            command_claimed_ = false;
++    }
++    std::size_t starting = 0;
++    for (const auto & joint : info_.joints) {
++        const auto key = joint.name + "/position";
++        if (std::find(start_interfaces.begin(), start_interfaces.end(), key) != start_interfaces.end())
++            ++starting;
++    }
++    if (starting && starting != 1) return hardware_interface::return_type::ERROR;
++    if (starting) {
++        // Reseed commands after hand-guiding; never replay the pre-teach target.
++        for (std::size_t i = 0; i < 1; ++i) {
++            if (!std::isfinite(joint_position_state_[i])) return hardware_interface::return_type::ERROR;
++            joint_position_command_[i] = joint_position_state_[i];
++        }
++        _last_command_percent = percent_for_joint(joint_position_state_[0]);
++        command_claimed_ = true;
++    }
++    return hardware_interface::return_type::OK;
+ }
+ 
+ hardware_interface::return_type FairinoGripperHardwareInterface::write(
+   const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/)
+ {
++    if (!_ptr_robot) return hardware_interface::return_type::ERROR;
++    if (!command_claimed_) return hardware_interface::return_type::OK;
++
+   if (!_active || !_ptr_robot) {
+     return hardware_interface::return_type::ERROR;
+   }

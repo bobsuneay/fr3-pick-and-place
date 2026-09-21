@@ -7,3 +7,8 @@ workpiece:
   # T_right_tcp_object at the taught right_grasp point: xyz[m], quaternion xyzw.
   # Measure for your part and grasp. This is NOT a robot controller tool offset.
   right_tcp_to_object: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+
+# Donor withdraws along negative TCP Z; MoveIt rejects blocked paths.
+retreat_distance_m: 0.06
+# World +Z clearance above the taught placement point.
+place_clearance_m: 0.08

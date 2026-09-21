@@ -28,7 +28,7 @@ def book():
     for name in SLOTS:
         result.record(name, point())
     result.points['right_pregrasp']['right']['gap_m'] = 0.1
-    result.points['left_retreat']['left']['gap_m'] = 0.1
+    result.points['ready']['left']['gap_m'] = 0.1
     return result
 
 
@@ -150,6 +150,18 @@ class FakeApp:
     def move_point(self, key, side, execute):
         self.event('move', side, key)
 
+    def initialize_scene(self):
+        pass
+
+    def scan_display(self, side):
+        self.event('scan', side)
+
+    def retreat_donor(self):
+        self.event('retreat', 'right')
+
+    def place_move(self, above):
+        self.event('place', above)
+
     def publish(self, text):
         pass
 
@@ -216,3 +228,18 @@ def test_fingerprint_tracks_scene_and_arms(tmp_path):
     before = model_fingerprint(arms, scene)
     scene.write_text('changed')
     assert before != model_fingerprint(arms, scene)
+
+
+def test_old_points_load_without_requiring_obsolete_views(tmp_path):
+    import json
+    source = book()
+    path = tmp_path / 'legacy.json'
+    source.save(path)
+    document = json.loads(path.read_text())
+    document['points']['right_view_1'] = point()
+    path.write_text(json.dumps(document))
+    target = TeachBook('model-test', 0.1)
+    target.load(path)
+    target.validate_complete()
+    assert len(target.points) == 7
+    assert 'right_view_1' in json.loads(path.read_text())['points']

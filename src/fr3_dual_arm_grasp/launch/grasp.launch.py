@@ -16,6 +16,7 @@ def generate_launch_description():
         'scene_file': str(description / 'config/scene.yaml'),
         'demo_config': str(grasp / 'config/demo.yaml'),
         'points_file': '~/.ros/fr3_demo/teach_points.json',
+        'mode': 'mock', 'hardware': '',
         'enable_execution': 'false', 'speed': '0.1',
     }
     parameters = {key: LaunchConfiguration(key) for key in defaults}

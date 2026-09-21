@@ -51,6 +51,7 @@ public:
     virtual CallbackReturn on_deactivate(const rclcpp_lifecycle::State&) = 0;
     virtual std::vector<StateInterface> export_state_interfaces() = 0;
     virtual std::vector<CommandInterface> export_command_interfaces() = 0;
+    virtual return_type perform_command_mode_switch(const std::vector<std::string>&, const std::vector<std::string>&) { return return_type::OK; }
     virtual return_type read(const rclcpp::Time&, const rclcpp::Duration&) = 0;
     virtual return_type write(const rclcpp::Time&, const rclcpp::Duration&) = 0;
 protected:

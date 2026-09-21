@@ -4,6 +4,7 @@ from .teach_model import recipe
 
 
 def run_workflow(app):
+    app.initialize_scene()
     app.book.validate_complete()
     app.motion.guard(True)
     if app.scene.owner or app.recovery_required:
@@ -22,6 +23,14 @@ def run_workflow(app):
             if kind == 'view':
                 if app.stop_event.wait(app.dwell):
                     raise RuntimeError('Cancelled during display')
+        elif kind == 'scan':
+            app.scan_display(side)
+        elif kind == 'retreat':
+            app.retreat_donor()
+        elif kind in ('preplace', 'place'):
+            if kind == 'place':
+                app.scene.allow(['left'], table=True)
+            app.place_move(above=(kind == 'preplace'))
         elif kind == 'grip':
             app.motion.gripper(side, app.book.points[key][side]['gap_m'], execute=True)
         elif kind == 'confirm':

@@ -14,6 +14,11 @@ hardware_interface::HardwareInfo info(int count, const std::string & ip="192.0.2
         {"j"+std::to_string(i), {{"position"}}, {{"position"}}});
     return result;
 }
+std::vector<std::string> keys(int count) {
+    std::vector<std::string> result;
+    for(int i=0;i<count;++i) result.push_back("j"+std::to_string(i)+"/position");
+    return result;
+}
 void order_test(bool gripper_first, bool release_gripper_first) {
     FRRobot::reset();
     {
@@ -23,10 +28,14 @@ void order_test(bool gripper_first, bool release_gripper_first) {
         assert(gripper.on_init(info(1))==CallbackReturn::SUCCESS);
         if(gripper_first) {
             assert(gripper.on_activate({})==CallbackReturn::SUCCESS);
+        assert(gripper.perform_command_mode_switch(keys(1), {})==return_type::OK);
             assert(arm.on_activate({})==CallbackReturn::SUCCESS);
+        assert(arm.perform_command_mode_switch(keys(6), {})==return_type::OK);
         } else {
             assert(arm.on_activate({})==CallbackReturn::SUCCESS);
+        assert(arm.perform_command_mode_switch(keys(6), {})==return_type::OK);
             assert(gripper.on_activate({})==CallbackReturn::SUCCESS);
+        assert(gripper.perform_command_mode_switch(keys(1), {})==return_type::OK);
         }
         assert(FRRobot::rpc_calls==1);
         assert(FRRobot::move_calls==0); // No open/close command during activation.
@@ -58,6 +67,22 @@ void order_test(bool gripper_first, bool release_gripper_first) {
     assert(FRRobot::close_calls==1);
 }
 int main() {
+    FRRobot::reset();
+    {
+        FairinoHardwareInterface arm;
+        assert(arm.on_init(info(6))==CallbackReturn::SUCCESS);
+        assert(arm.on_activate({})==CallbackReturn::SUCCESS);
+        assert(arm.write({}, {})==return_type::OK && FRRobot::servo_calls==0);
+        assert(arm.perform_command_mode_switch(keys(6), {})==return_type::OK);
+        assert(arm.write({}, {})==return_type::OK && FRRobot::servo_calls==1);
+        assert(arm.perform_command_mode_switch({}, keys(6))==return_type::OK);
+        *arm.export_command_interfaces()[0].value = 2.0;
+        assert(arm.read({}, {})==return_type::OK);
+        assert(arm.write({}, {})==return_type::OK && FRRobot::servo_calls==1);
+        assert(arm.perform_command_mode_switch(keys(6), {})==return_type::OK);
+        assert(arm.write({}, {})==return_type::OK && FRRobot::servo_calls==2);
+        assert(std::abs(FRRobot::last_command.jPos[0]-10.0)<1e-9);
+    }
     for(bool first:{false,true}) for(bool release:{false,true}) order_test(first,release);
     FRRobot::reset();
     {
@@ -65,6 +90,7 @@ int main() {
         FairinoGripperHardwareInterface gripper;
         arm.on_init(info(6)); gripper.on_init(info(1));
         assert(arm.on_activate({})==CallbackReturn::SUCCESS);
+        assert(arm.perform_command_mode_switch(keys(6), {})==return_type::OK);
         FRRobot::activation_error=13;
         assert(gripper.on_activate({})==CallbackReturn::ERROR);
         assert(FRRobot::close_calls==0 && arm.read({},{})==return_type::OK);
@@ -75,6 +101,7 @@ int main() {
         assert(arm.read({},{})==return_type::ERROR);
         FRRobot::feedback_error=0;
         assert(gripper.on_activate({})==CallbackReturn::SUCCESS);
+        assert(gripper.perform_command_mode_switch(keys(1), {})==return_type::OK);
         assert(FRRobot::rpc_calls==1);
         FRRobot::feedback_percent=101;
         assert(gripper.read({},{})==return_type::ERROR);
@@ -88,7 +115,9 @@ int main() {
         arm.on_deactivate({}); gripper.on_deactivate({});
         assert(FRRobot::close_calls==1);
         assert(gripper.on_activate({})==CallbackReturn::SUCCESS);
+        assert(gripper.perform_command_mode_switch(keys(1), {})==return_type::OK);
         assert(arm.on_activate({})==CallbackReturn::SUCCESS);
+        assert(arm.perform_command_mode_switch(keys(6), {})==return_type::OK);
         assert(FRRobot::rpc_calls==2);
     }
     assert(FRRobot::live==0 && FRRobot::close_calls==2);
@@ -99,6 +128,7 @@ int main() {
         assert(arm.on_activate({})==CallbackReturn::ERROR);
         FRRobot::rpc_error=0;
         assert(arm.on_activate({})==CallbackReturn::SUCCESS);
+        assert(arm.perform_command_mode_switch(keys(6), {})==return_type::OK);
         assert(FRRobot::rpc_calls==2);
         FairinoGripperHardwareInterface gripper; gripper.on_init(info(1,"192.0.2.2"));
         assert(gripper.on_activate({})==CallbackReturn::ERROR);
@@ -115,12 +145,14 @@ int main() {
         FRRobot::feedback_error=0;
         FairinoGripperHardwareInterface gripper; gripper.on_init(info(1));
         assert(gripper.on_activate({})==CallbackReturn::SUCCESS);
+        assert(gripper.perform_command_mode_switch(keys(1), {})==return_type::OK);
         FRRobot::feedback_error=11;
         assert(arm.on_activate({})==CallbackReturn::ERROR);
         assert(FRRobot::live==1 && FRRobot::close_calls==1);
         FRRobot::feedback_error=0;
         assert(gripper.read({},{})==return_type::OK);
         assert(arm.on_activate({})==CallbackReturn::SUCCESS);
+        assert(arm.perform_command_mode_switch(keys(6), {})==return_type::OK);
         assert(FRRobot::rpc_calls==2);
     }
     assert(FRRobot::live==0 && FRRobot::close_calls==2);
@@ -139,6 +171,7 @@ int main() {
         assert(gripper.on_init(config)==CallbackReturn::SUCCESS);
         FRRobot::feedback_percent=25;
         assert(gripper.on_activate({})==CallbackReturn::SUCCESS);
+        assert(gripper.perform_command_mode_switch(keys(1), {})==return_type::OK);
         auto states=gripper.export_state_interfaces();
         FRRobot::feedback_percent=50;
         assert(gripper.read({},{})==return_type::OK);

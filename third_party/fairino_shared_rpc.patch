@@ -20,7 +20,7 @@
  };
 --- a/fairino_hardware_v3_9_7/include/fairino_hardware/fairino_hardware_interface.hpp
 +++ b/fairino_hardware_v3_9_7/include/fairino_hardware/fairino_hardware_interface.hpp
-@@ -9,6 +9,6 @@
+@@ -9,7 +9,7 @@
  #include "hardware_interface/types/hardware_interface_type_values.hpp"
  #include "visibility_control.h"
  #include <vector>
@@ -28,6 +28,7 @@
 +#include "shared_robot_connection.hpp"
  
  
+ #define CONTROLLER_IP_ADDRESS "192.168.58.2"
 @@ -20,6 +20,8 @@
  class FairinoHardwareInterface: public hardware_interface::SystemInterface{
  public:

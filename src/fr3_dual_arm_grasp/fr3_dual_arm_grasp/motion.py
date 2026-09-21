@@ -231,13 +231,16 @@ class DualArmMoveIt:
         self.display.publish(msg)
 
     def linear(self, side, values, execute=False):
+        return self.cartesian(side, [values], execute)
+
+    def cartesian(self, side, waypoints, execute=False):
         self.guard(execute)
         self.check_state()
         req = GetCartesianPath.Request()
         req.header.frame_id, req.group_name, req.link_name = 'world', side + '_arm', side + '_gripper_tcp'
         planning_start = self.guard()
         req.start_state = self.state(planning_start)
-        req.waypoints = [pose_msg(values)]
+        req.waypoints = [pose_msg(values) for values in waypoints]
         req.max_step, req.jump_threshold, req.avoid_collisions = 0.002, 2.0, True
         result = self.service(self.cart, req)
         if result.error_code.val != 1 or result.fraction < 0.999999:
@@ -246,6 +249,7 @@ class DualArmMoveIt:
         points = trajectory.joint_trajectory.points
         if len(points) < 2:
             raise RuntimeError('Cartesian path empty')
+        speed = self.speed  # One immutable speed per planned segment.
         previous = 0.0
         for index, point in enumerate(points):
             if (len(point.positions) != len(trajectory.joint_trajectory.joint_names)
@@ -257,11 +261,11 @@ class DualArmMoveIt:
             if index and max(abs(a-b) for a, b in zip(points[index-1].positions, point.positions)) > 0.15:
                 raise RuntimeError('Cartesian joint jump > 0.15 rad')
             previous = seconds
-            seconds /= self.speed
+            seconds /= speed
             point.time_from_start.sec = int(seconds)
             point.time_from_start.nanosec = int((seconds-int(seconds))*1e9)
-            point.velocities = [v*self.speed for v in point.velocities]
-            point.accelerations = [a*self.speed*self.speed for a in point.accelerations]
+            point.velocities = [v*speed for v in point.velocities]
+            point.accelerations = [a*speed*speed for a in point.accelerations]
         self.show(result.start_state, trajectory)
         if execute:
             current = self.guard(True)

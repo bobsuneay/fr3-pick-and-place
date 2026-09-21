@@ -21,6 +21,8 @@ class TeachUI:
         self.controls = []
         self.side = tk.StringVar(value='right')
         self.status = tk.StringVar()
+        self.speed = tk.DoubleVar(value=app.motion.speed*100)
+        self.speed_label = tk.StringVar()
         self.feedback = tk.StringVar(value='等待 /joint_states')
         self.path = tk.StringVar(value=app.points_file)
         self.joints = [tk.StringVar(value='0') for _ in range(6)]
@@ -53,22 +55,37 @@ class TeachUI:
         top.pack(fill='x')
         mode = '执行已启用' if self.app.motion.enabled else '只规划 / 采集（enable_execution=false）'
         ttk.Label(top, text='FR3 双臂示教 DEMO', font=('', 18, 'bold')).pack(side='left')
-        ttk.Label(top, text=f'  {mode}  |  速度比例 {self.app.motion.speed:.0%}  |  TCP: world → gripper_tcp').pack(side='left', padx=16)
+        ttk.Label(top, text=f'  {mode}  |  TCP: world → gripper_tcp').pack(side='left', padx=16)
+        speed_row = ttk.Frame(self.root, padding=6)
+        speed_row.pack(fill='x')
+        ttk.Label(speed_row, text='运行速度（1–30%）').pack(side='left')
+        ttk.Scale(speed_row, from_=1, to=30, variable=self.speed, command=self.change_speed).pack(side='left', fill='x', expand=True)
+        ttk.Label(speed_row, textvariable=self.speed_label, width=48).pack(side='left')
+        self.speed_label.set(f'{self.app.motion.speed:.0%} · 下一段规划生效')
         ttk.Label(self.root, textvariable=self.feedback, padding=10, font=('TkFixedFont', 10)).pack(fill='x')
         status = ttk.LabelFrame(self.root, text='流程状态', padding=8)
         status.pack(fill='x', padx=10)
         ttk.Label(status, textvariable=self.status, wraplength=1250, font=('', 11)).pack(anchor='w')
         body = ttk.Panedwindow(self.root, orient='horizontal')
         body.pack(fill='both', expand=True, padx=10, pady=10)
-        manual, teach = ttk.Frame(body, padding=8), ttk.Frame(body, padding=8)
-        body.add(manual, weight=1)
+        manual_container, teach = ttk.Frame(body), ttk.Frame(body, padding=8)
+        canvas = tk.Canvas(manual_container, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(manual_container, orient='vertical', command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side='right', fill='y')
+        canvas.pack(side='left', fill='both', expand=True)
+        manual = ttk.Frame(canvas, padding=8)
+        window = canvas.create_window((0, 0), window=manual, anchor='nw')
+        manual.bind('<Configure>', lambda event: canvas.configure(scrollregion=canvas.bbox('all')))
+        canvas.bind('<Configure>', lambda event: canvas.itemconfigure(window, width=event.width))
+        body.add(manual_container, weight=1)
         body.add(teach, weight=2)
 
         selection = ttk.Frame(manual)
         selection.pack(fill='x')
         ttk.Label(selection, text='当前手臂').pack(side='left')
         ttk.Combobox(selection, textvariable=self.side, values=['right', 'left'], state='readonly', width=10).pack(side='left', padx=8)
-        self.button(selection, '读取关节 / TCP', lambda: self.submit('读取当前状态', self.app.capture))
+        self.button(selection, '当前姿态填入目标', lambda: self.submit('读取当前状态', self.app.capture))
         joint_frame = ttk.LabelFrame(manual, text='关节目标（度）· MoveJ / OMPL', padding=8)
         joint_frame.pack(fill='x', pady=8)
         for i, variable in enumerate(self.joints):
@@ -97,7 +114,11 @@ class TeachUI:
         row.pack(fill='x')
         self.button(row, '规划夹爪', lambda: self.gripper_move(False))
         self.button(row, '执行夹爪', lambda: self.gripper_move(True))
-        ttk.Label(manual, text='所有运动均经过 MoveIt。\n直线路径必须 100% 成功才执行。\n单点回放只移动关节，不自动改变夹爪。\n示教时可用机器人示教器定位，再采集；\n本界面不直接调用 SDK，不切换拖动模式。', wraplength=410).pack(anchor='w', pady=12)
+        ttk.Label(manual, text='所有运动均经过 MoveIt。\n直线路径必须 100% 成功才执行。\n单点回放只移动关节，不自动改变夹爪。\n示教时可用机器人示教器定位，再采集；\n执行后点击“进入拖动示教”释放保持指令。', wraplength=410).pack(anchor='w', pady=12)
+        teaching = ttk.Frame(manual)
+        teaching.pack(fill='x')
+        self.button(teaching, '进入拖动示教', lambda: self.submit('进入拖动示教', lambda: self.app.set_teach_mode(True)))
+        self.button(teaching, '恢复运动控制', lambda: self.submit('恢复运动控制', lambda: self.app.set_teach_mode(False)))
         self.button(manual, '加载感知候选到输入框（不运动）', self.use_candidate)
 
         files = ttk.Frame(teach)
@@ -107,8 +128,8 @@ class TeachUI:
         self.button(files, '另存为', self.save_as)
         tree_frame = ttk.Frame(teach)
         tree_frame.pack(fill='both', expand=True, pady=6)
-        self.tree = ttk.Treeview(tree_frame, columns=('name', 'saved'), show='headings', selectmode='browse', height=16)
-        self.tree.heading('name', text='关键点（按流程顺序采集）')
+        self.tree = ttk.Treeview(tree_frame, columns=('name', 'saved'), show='headings', selectmode='browse', height=7)
+        self.tree.heading('name', text='7 个关键点（展示仅采一个参考姿态）')
         self.tree.heading('saved', text='状态')
         self.tree.column('name', width=410)
         self.tree.column('saved', width=90)
@@ -133,7 +154,7 @@ class TeachUI:
         ttk.Label(row, text='选中点 / 当前手臂的夹持目标：闭合 %').pack(side='left')
         ttk.Entry(row, textvariable=self.saved_gap, width=8).pack(side='left')
         self.button(row, '只保存开度', self.edit_gap)
-        ttk.Label(teach, text='抓取 / 接取点保存夹持目标开度；接近 / 撤离点保存张开开度。\n原始关节与 TCP 均来自同一次双臂反馈快照，保存单位为 rad / m / 四元数。').pack(anchor='w', pady=6)
+        ttk.Label(teach, text='抓取 / 接取点保存夹持目标开度；就绪点保存双夹爪张开开度。\n展示点只取右手参考姿态，位置自动对准头部相机前 30 cm。\n原始关节与 TCP 均来自同一次双臂反馈快照，保存单位为 rad / m / 四元数。').pack(anchor='w', pady=6)
         actions = ttk.Frame(self.root, padding=10)
         actions.pack(fill='x')
         self.button(actions, '检查示教点完整性', lambda: self.submit('检查示教点', self.app.book.validate_complete))
@@ -143,6 +164,11 @@ class TeachUI:
         tk.Button(actions, text='停止流程 / 取消运动', bg='#ba2832', fg='white', command=self.app.motion.cancel).pack(side='left', padx=8)
         self.button(actions, '人工恢复后清除任务状态', self.recover)
         ttk.Label(self.root, text='软件停止不替代硬件急停。停止后保留夹爪；完整流程不会自动重启。预览只检查当前状态到选中目标的一段路径。', padding=6).pack(fill='x')
+
+    def change_speed(self, value):
+        percent = round(float(value))
+        self.app.set_speed(percent)
+        self.speed_label.set(f'{percent}% · 下一段规划生效')
 
     def selected(self):
         selected = self.tree.selection()
@@ -234,7 +260,7 @@ class TeachUI:
         self.details.set('\n'.join(lines))
 
     def refresh(self):
-        self.status.set(self.app.status_text + f'  |  零件附着: {self.app.scene.owner or "无"}')
+        self.status.set(self.app.status_text + f'  |  模式: {self.app.teaching.state}  |  零件附着: {self.app.scene.owner or "无"}')
         self.path.set(self.app.points_file)
         try:
             values = self.app.feedback.snapshot()
@@ -243,6 +269,14 @@ class TeachUI:
                 joints = '  '.join(f'{math.degrees(values[f"{side}_j{i}"]):7.2f}' for i in range(1, 7))
                 gap = values[side + '_left_finger_joint']*2
                 lines.append(f'{side:5} J° [{joints}]   开口 {gap*1000:.2f} mm  闭合 {gap_to_percent(max(0, min(self.app.open_gap, gap)), self.app.open_gap):.1f}%')
+            if self.app.live_pose_error or time.monotonic() - self.app.live_stamp > 1.0:
+                lines.append('TCP: ' + (self.app.live_pose_error or '反馈已过期'))
+            else:
+                for side in ('right', 'left'):
+                    pose = self.app.live_poses[side]
+                    xyz = ' '.join(f'{v*1000:.2f}' for v in pose[:3])
+                    rpy = ' '.join(f'{v:.2f}' for v in Rotation.from_quat(pose[3:]).as_euler('xyz', degrees=True))
+                    lines.append(f'{side:5} TCP mm [{xyz}]  RPY° [{rpy}]')
             self.feedback.set('\n'.join(lines))
         except Exception as exc:
             self.feedback.set(str(exc))

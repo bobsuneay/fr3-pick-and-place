@@ -24,6 +24,8 @@ for file in "${optional[@]}"; do
   fi
 done
 apply() { (cd -- "$stage" && patch --force --no-backup-if-mismatch --fuzz=0 -p1 "$@" < "$repo_root/third_party/$patch_name"); }
+patch_name=fairino_teach_mode.patch
+if ! apply --dry-run -R >/dev/null 2>&1; then
 patch_name=fairino_shared_rpc.patch
 if ! apply --dry-run -R >/dev/null 2>&1; then
   for patch_name in fairino_dual_arm_ip.patch fairino_gripper_interface.patch fairino_shared_rpc.patch; do
@@ -32,9 +34,13 @@ if ! apply --dry-run -R >/dev/null 2>&1; then
     apply --forward
   done
 fi
+patch_name=fairino_teach_mode.patch
+apply --forward --dry-run
+apply --forward
+fi
 # The shared patch changes the gripper patch's context. Verify in reverse order.
 cp -R "$stage/$package" "$stage/verify"
-for patch_name in fairino_shared_rpc.patch fairino_gripper_interface.patch fairino_dual_arm_ip.patch; do
+for patch_name in fairino_teach_mode.patch fairino_shared_rpc.patch fairino_gripper_interface.patch fairino_dual_arm_ip.patch; do
   apply -R
 done
 changed=false

@@ -12,23 +12,17 @@ SIDES = ('left', 'right')
 JOINTS = tuple(f'{s}_j{i}' for s in SIDES for i in range(1, 7))
 MEASURED = JOINTS + tuple(f'{s}_left_finger_joint' for s in SIDES)
 SLOTS = {
-    'ready': '双臂起始 / 空手就绪',
-    'right_pregrasp': '右手抓取接近点（张开）',
+    'ready': '双臂就绪（双夹爪张开）',
+    'right_pregrasp': '右手抓取接近点（张开，复用于抬升）',
     'right_grasp': '右手抓取点（夹持开度）',
-    'right_lift': '右手抬升点',
-    'right_display': '右手展示初始姿态',
-    'right_view_1': '右手展示角度 1',
-    'right_view_2': '右手展示角度 2',
+    'right_display': '展示参考（右手姿态；双臂共用，相机前 30 cm）',
     'handover_ready': '双臂交接预备（左手保持接近距离）',
     'left_receive': '左手接取点（夹持开度，右手不动）',
-    'right_retreat': '右手交接后撤离点',
-    'left_display': '左手展示初始姿态',
-    'left_view_1': '左手展示角度 1',
-    'left_view_2': '左手展示角度 2',
-    'left_preplace': '左手放置接近点',
     'left_place': '左手放置点（保持夹持）',
-    'left_retreat': '左手放下后撤离点（张开）',
 }
+LEGACY_SLOTS = {'right_lift', 'right_view_1', 'right_view_2', 'right_retreat',
+                'left_display', 'left_view_1', 'left_view_2', 'left_preplace', 'left_retreat'}
+
 
 
 def finite_vector(value, length, label):
@@ -123,7 +117,7 @@ class TeachBook:
         if max(abs(a-b) for a, b in zip(donor, receive_donor)) > 0.02:
             raise ValueError('Right arm changed between handover_ready and left_receive; reteach')
         for side, closed, opened in [('right', 'right_grasp', 'right_pregrasp'),
-                                     ('left', 'left_receive', 'left_retreat')]:
+                                     ('left', 'left_receive', 'ready')]:
             if self.points[opened][side]['gap_m'] <= self.points[closed][side]['gap_m'] + 0.002:
                 raise ValueError(f'{side}: teach an open gap at least 2 mm wider than the grasp gap')
 
@@ -145,6 +139,9 @@ class TeachBook:
             raise ValueError('Unsupported units; SDK mm/degree files cannot be replayed directly')
         candidate = TeachBook(self.fingerprint, self.open_gap)
         for name, point in document['points'].items():
+            if name in LEGACY_SLOTS:
+                candidate.validate_point(point)
+                continue  # Preserve old file on disk; obsolete points are not required.
             candidate.record(name, point)
         self.points = candidate.points
 
@@ -166,21 +163,19 @@ def recipe():
     """Explicit ownership transitions; motion never silently changes a gripper."""
     return [
         ('move', 'both', 'ready'),
-        ('grip', 'right', 'right_pregrasp'), ('grip', 'left', 'left_retreat'),
+        ('grip', 'right', 'right_pregrasp'), ('grip', 'left', 'ready'),
         ('move', 'right', 'right_pregrasp'), ('move', 'right', 'right_grasp'),
         ('grip', 'right', 'right_grasp'), ('confirm', 'right', '确认右手已夹稳零件'),
-        ('attach', 'right', ''), ('move', 'right', 'right_lift'),
-        ('move', 'right', 'right_display'), ('view', 'right', 'right_view_1'),
-        ('view', 'right', 'right_view_2'), ('move', 'right', 'right_display'),
+        ('attach', 'right', ''), ('move', 'right', 'right_pregrasp'),
+        ('scan', 'right', 'right_display'),
         ('move', 'both', 'handover_ready'), ('touch', 'left', ''),
         ('move', 'left', 'left_receive'), ('grip', 'left', 'left_receive'),
         ('confirm', 'left', '确认左手已夹稳；继续后右手将松开'),
         ('transfer', 'left', ''), ('grip', 'right', 'right_pregrasp'),
-        ('move', 'right', 'right_retreat'), ('touch_only', 'left', ''),
-        ('move', 'left', 'left_display'), ('view', 'left', 'left_view_1'),
-        ('view', 'left', 'left_view_2'), ('move', 'left', 'left_display'),
-        ('move', 'left', 'left_preplace'), ('move', 'left', 'left_place'),
+        ('retreat', 'right', ''), ('touch_only', 'left', ''),
+        ('move', 'right', 'ready'), ('scan', 'left', 'right_display'),
+        ('preplace', 'left', ''), ('place', 'left', ''),
         ('confirm', 'left', '确认零件已到达放置位置；继续后左手将松开'),
-        ('grip', 'left', 'left_retreat'), ('detach', 'left', ''),
-        ('move', 'left', 'left_retreat'),
+        ('grip', 'left', 'ready'), ('detach', 'left', ''),
+        ('preplace', 'left', ''), ('move', 'left', 'ready'),
     ]

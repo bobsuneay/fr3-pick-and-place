@@ -3,6 +3,12 @@ from copy import deepcopy
 import json
 from pathlib import Path
 import threading
+import time
+import math
+import numpy as np
+from scipy.spatial.transform import Rotation
+from moveit_msgs.srv import GetPositionFK
+from controller_manager_msgs.srv import SwitchController, ListControllers
 
 import rclpy
 from rclpy.node import Node
@@ -18,6 +24,8 @@ from .teach_model import (Feedback, TeachBook, captured_point, model_fingerprint
 from .motion import DualArmMoveIt, pose_values
 from .demo_scene import DemoScene
 from .workflow import run_workflow
+from .display_geometry import VIEWS, matrix, vector, camera_neutral, object_path
+from .teaching import TeachingMode, robot_mode
 
 
 class DemoApp(Node):
@@ -25,13 +33,19 @@ class DemoApp(Node):
         super().__init__('fr3_teach_demo')
         for key, value in [('arms_file', ''), ('scene_file', ''), ('demo_config', ''),
                            ('points_file', '~/.ros/fr3_demo/teach_points.json'),
-                           ('enable_execution', False), ('speed', 0.1)]:
+                           ('enable_execution', False), ('speed', 0.1), ('mode', 'mock'), ('hardware', '')]:
             self.declare_parameter(key, value)
         param = lambda key: self.get_parameter(key).value
         self.arms_file, self.scene_file = param('arms_file'), param('scene_file')
         arms = yaml.safe_load(Path(self.arms_file).read_text(encoding='utf-8'))
         scene = yaml.safe_load(Path(self.scene_file).read_text(encoding='utf-8'))
         config = yaml.safe_load(Path(param('demo_config')).read_text(encoding='utf-8'))
+        self.mode = param('mode')
+        self.robot_ips = {}
+        if self.mode == 'real':
+            from fr3_dual_arm_description.model import validate_hardware
+            hardware = validate_hardware(yaml.safe_load(Path(param('hardware')).expanduser().read_text(encoding='utf-8')))
+            self.robot_ips = {side: hardware[side]['robot_ip'] for side in SIDES}
         self.open_gap = float(arms['gripper']['open_gap'])
         self.feedback = Feedback(max_age=1.0)
         self.stop_event, self.confirm_event = threading.Event(), threading.Event()
@@ -40,6 +54,14 @@ class DemoApp(Node):
         self.status_text, self.awaiting_confirmation = '就绪：等待机器人反馈', ''
         self.recovery_required = False
         self.motion = DualArmMoveIt(self, self.feedback, self.stop_event, param('enable_execution'), param('speed'))
+        self.switch_clients = {side: self.create_client(SwitchController,
+            f'/{side}_controller_manager/switch_controller') for side in SIDES}
+        self.list_clients = {side: self.create_client(ListControllers,
+            f'/{side}_controller_manager/list_controllers') for side in SIDES}
+        self.teaching = TeachingMode(self.switch_controllers, self.teach_command)
+        self.live_poses, self.live_pose_error = {}, '等待实时 TCP'
+        self.live_stamp, self.live_pending = 0.0, None
+        self.create_timer(0.2, self.update_live_pose)
         dimensions = finite_vector(config['workpiece']['dimensions_m'], 3, 'workpiece dimensions')
         if any(x <= 0 or x > 1 for x in dimensions):
             raise ValueError('Workpiece box dimensions must be in (0, 1] m')
@@ -48,6 +70,10 @@ class DemoApp(Node):
         self.dwell = float(config.get('display_dwell_seconds', 2.0))
         if not 0 <= self.dwell <= 60:
             raise ValueError('Display dwell must be 0..60 seconds')
+        self.retreat_distance = float(config.get('retreat_distance_m', 0.06))
+        self.place_clearance = float(config.get('place_clearance_m', 0.08))
+        if not all(math.isfinite(x) and 0.01 <= x <= 0.3 for x in (self.retreat_distance, self.place_clearance)):
+            raise ValueError('Retreat/placement clearance must be 0.01..0.3 m')
         self.commissioned = config.get('scene_and_object_verified', False) is True
         self.book = TeachBook(model_fingerprint(self.arms_file, self.scene_file), self.open_gap)
         self.points_file = str(Path(param('points_file')).expanduser())
@@ -76,6 +102,80 @@ class DemoApp(Node):
 
     def on_joints(self, msg):
         self.feedback.update(msg.name, msg.position)
+
+    def update_live_pose(self):
+        # Non-blocking and independent of motion cancellation/operation lock.
+        if self.live_pending is not None and not self.live_pending.done():
+            if time.monotonic() - self.live_request_time > 2:
+                self.live_pending.cancel()
+                self.live_pending = None
+                self.live_pose_error = 'FK 反馈超时'
+            return
+        try:
+            values = self.feedback.snapshot()
+            if not self.motion.fk.service_is_ready():
+                raise RuntimeError('等待 /compute_fk')
+            request = GetPositionFK.Request()
+            request.header.frame_id = 'world'
+            request.fk_link_names = [side + '_gripper_tcp' for side in SIDES]
+            request.robot_state = self.motion.state(values)
+            self.live_request_time = time.monotonic()
+            self.live_pending = self.motion.fk.call_async(request)
+            stamp = self.live_request_time
+            def receive(future):
+                try:
+                    result = future.result()
+                    if result.error_code.val != 1:
+                        raise RuntimeError('实时 FK 失败')
+                    poses = dict(zip(result.fk_link_names, result.pose_stamped))
+                    self.live_poses = {side: pose_values(poses[side + '_gripper_tcp'].pose) for side in SIDES}
+                    self.live_stamp, self.live_pose_error = stamp, ''
+                except Exception as exc:
+                    self.live_pose_error = str(exc)
+            self.live_pending.add_done_callback(receive)
+        except Exception as exc:
+            self.live_pose_error = str(exc)
+
+    def set_speed(self, percent):
+        value = float(percent) / 100
+        if not math.isfinite(value) or not 0.01 <= value <= 0.3:
+            raise ValueError('速度范围为 1%–30%')
+        self.motion.speed = value
+        self.publish(f'速度 {percent:.0f}%：下一段规划生效，当前运动不突变')
+
+    def switch_controllers(self, side, activate):
+        if activate and not self.motion.enabled:
+            return
+        client = self.list_clients[side]
+        response = self.motion.service(client, ListControllers.Request())
+        states = {c.name: c.state for c in response.controller}
+        names = [side + '_arm_controller', side + '_gripper_controller']
+        if any(name not in states for name in names):
+            raise RuntimeError(f'{side} 控制器未加载')
+        changed = [name for name in names if (states[name] != 'active') == activate]
+        if not changed:
+            return
+        request = SwitchController.Request()
+        # Humble and later field names; deprecated aliases are only fallback.
+        on = 'activate_controllers' if hasattr(request, 'activate_controllers') else 'start_controllers'
+        off = 'deactivate_controllers' if hasattr(request, 'deactivate_controllers') else 'stop_controllers'
+        setattr(request, on if activate else off, changed)
+        request.strictness = SwitchController.Request.STRICT
+        request.timeout.sec = 5
+        if not self.motion.service(self.switch_clients[side], request).ok:
+            raise RuntimeError(f'{side} 控制器切换失败')
+
+    def teach_command(self, side, method, value):
+        if self.mode == 'real':
+            robot_mode(self.robot_ips[side], method, value)
+
+    def set_teach_mode(self, enabled):
+        if self.motion.fault:
+            raise RuntimeError('运动结果不确定，请检查实机并重启后再切换')
+        if enabled and (self.scene.owner or self.recovery_required):
+            raise RuntimeError('请先人工处理零件并清除任务状态，再进入拖动示教')
+        (self.teaching.enter if enabled else self.teaching.leave)()
+        self.publish('拖动示教已启用，可拖动后采集' if enabled else '运动控制已恢复')
 
     def on_candidate(self, msg):
         if msg.header.frame_id != 'world':
@@ -119,6 +219,8 @@ class DemoApp(Node):
         self.worker.start()
 
     def initialize_scene(self):
+        if self.teaching.state != 'motion':
+            raise RuntimeError('请先恢复运动控制；当前模式：' + self.teaching.state)
         if not self.scene.ready:
             self.scene.initialize()
 
@@ -139,11 +241,62 @@ class DemoApp(Node):
 
     def move_point(self, name, side, execute=False):
         self.initialize_scene()
+        if name == 'right_display':
+            if side == 'both':
+                raise ValueError('展示中心由单臂占用，请选择左手或右手')
+            return self.move_display_neutral(side, execute)
         point = deepcopy(self.book.points[name])
         self.book.validate_point(point)
         sides = SIDES if side == 'both' else (side,)
         targets = {f'{s}_j{i}': q for s in sides for i, q in enumerate(point[s]['joints'], 1)}
         return self.motion.joints(targets, 'both_arms' if side == 'both' else side + '_arm', execute)
+
+    def tcp_object(self, side):
+        if self.scene.owner == side and self.scene.local_pose is not None:
+            return matrix(self.scene.local_pose)
+        right = matrix(self.scene.offset)
+        if side == 'right':
+            return right
+        receive = self.book.points['left_receive']
+        return np.linalg.inv(matrix(receive['left']['tcp'])) @ matrix(receive['right']['tcp']) @ right
+
+    def display_neutral(self):
+        # The stored measured joints/TCP remain unchanged; derive targets at use time.
+        return camera_neutral(self.scene.scene['camera'],
+            self.book.points['right_display']['right']['tcp'], matrix(self.scene.offset))
+
+    def move_display_neutral(self, side, execute=False):
+        target = vector(self.display_neutral() @ np.linalg.inv(self.tcp_object(side)))
+        return self.motion.pose(side, target, execute=execute)
+
+    def scan_display(self, side):
+        neutral, offset = self.display_neutral(), self.tcp_object(side)
+        self.move_display_neutral(side, True)
+        for index, angles in enumerate(VIEWS, 1):
+            self.motion.guard(True)
+            self.publish(f'{side} 展示 {index}/{len(VIEWS)}，零件 RPY {angles}°')
+            target = neutral.copy()
+            target[:3, :3] = neutral[:3, :3] @ Rotation.from_euler('xyz', angles, degrees=True).as_matrix()
+            if any(angles):
+                self.motion.cartesian(side, object_path(neutral, target, offset), True)
+            if self.stop_event.wait(self.dwell):
+                raise RuntimeError('展示已停止')
+            if any(angles):
+                self.motion.cartesian(side, object_path(target, neutral, offset), True)
+
+    def retreat_donor(self):
+        tcp = matrix(self.motion.tcp_poses()['right'])
+        tcp[:3, 3] -= tcp[:3, 2] * self.retreat_distance
+        self.motion.pose('right', vector(tcp), execute=True, linear=True)
+
+    def place_move(self, above):
+        pose = list(self.book.points['left_place']['left']['tcp'])
+        pose[2] += self.place_clearance
+        if above:
+            # Before placement use global planning; after detach rise linearly.
+            self.motion.pose('left', pose, True, linear=self.scene.owner is None)
+        else:
+            self.motion.pose('left', self.book.points['left_place']['left']['tcp'], True, linear=True)
 
     def manual_joints(self, side, joints, execute):
         self.initialize_scene()
