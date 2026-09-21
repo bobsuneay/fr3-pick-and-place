@@ -96,6 +96,7 @@ def start(context):
         executable='rviz2',
         parameters=[moveit_params],
         arguments=['-d', str(description_share / 'config' / 'dual_arm.rviz')],
+        remappings=[('/head_camera/image_raw', arg('camera_topic'))],
         condition=IfCondition(LaunchConfiguration('rviz')),
         output='screen',
     )
@@ -182,6 +183,7 @@ def generate_launch_description():
         DeclareLaunchArgument('enable_execution', default_value='false'),
         DeclareLaunchArgument('rviz', default_value='true'),
         DeclareLaunchArgument('gui', default_value='true'),
+        DeclareLaunchArgument('camera_topic', default_value='/head_camera/image_raw'),
         DeclareLaunchArgument(
             'scene',
             default_value=str(description_share / 'config/scene.yaml')),
