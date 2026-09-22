@@ -37,9 +37,11 @@ def box_object(name, dimensions, pose, frame='world'):
 class DemoScene:
     OBJECT = 'fr3_demo_workpiece'
 
-    def __init__(self, node, motion, scene, dimensions, tcp_offset):
+    def __init__(self, node, motion, scene, dimensions, tcp_offset,
+                 show_workpiece=False):
         self.motion, self.scene = motion, scene
         self.dimensions, self.offset = dimensions, tcp_offset
+        self.show_workpiece = bool(show_workpiece)
         self.owner, self.local_pose, self.world_pose = None, None, None
         self.touch_sides = []
         self.apply = node.create_client(ApplyPlanningScene, '/apply_planning_scene')
@@ -98,10 +100,11 @@ class DemoScene:
         if not self.ready:
             self.initialize()
         self.world_pose = vector(matrix(grasp_pose) @ matrix(self.offset))
-        self.allow(['right'], table=True)
-        req = self.diff()
-        req.scene.world.collision_objects = [box_object(self.OBJECT, self.dimensions, self.world_pose)]
-        self.commit(req)
+        if self.show_workpiece:
+            self.allow(['right'], table=True)
+            req = self.diff()
+            req.scene.world.collision_objects = [box_object(self.OBJECT, self.dimensions, self.world_pose)]
+            self.commit(req)
 
     def current_world(self):
         if self.owner:
@@ -121,18 +124,19 @@ class DemoScene:
         tcp = self.motion.tcp_poses()[side]
         local = vector(np.linalg.inv(matrix(tcp)) @ matrix(world))
         touch = ['left', 'right'] if transfer else [side]
-        self.allow(touch)
-        req = self.diff()
-        if self.owner:
-            old = AttachedCollisionObject()
-            old.link_name, old.object.id, old.object.operation = self.owner + '_gripper_tcp', self.OBJECT, CollisionObject.REMOVE
-            req.scene.robot_state.attached_collision_objects.append(old)
-        else:
-            old = CollisionObject()
-            old.id, old.operation = self.OBJECT, CollisionObject.REMOVE
-            req.scene.world.collision_objects.append(old)
-        req.scene.robot_state.attached_collision_objects.append(self.attached(side, local, touch))
-        self.commit(req)
+        if self.show_workpiece:
+            self.allow(touch)
+            req = self.diff()
+            if self.owner:
+                old = AttachedCollisionObject()
+                old.link_name, old.object.id, old.object.operation = self.owner + '_gripper_tcp', self.OBJECT, CollisionObject.REMOVE
+                req.scene.robot_state.attached_collision_objects.append(old)
+            else:
+                old = CollisionObject()
+                old.id, old.operation = self.OBJECT, CollisionObject.REMOVE
+                req.scene.world.collision_objects.append(old)
+            req.scene.robot_state.attached_collision_objects.append(self.attached(side, local, touch))
+            self.commit(req)
         self.owner, self.local_pose, self.touch_sides = side, local, touch
 
     def set_touch(self, sides):
@@ -145,12 +149,13 @@ class DemoScene:
 
     def detach(self):
         world = self.current_world()
-        req = self.diff()
-        old = AttachedCollisionObject()
-        old.link_name, old.object.id, old.object.operation = self.owner + '_gripper_tcp', self.OBJECT, CollisionObject.REMOVE
-        req.scene.robot_state.attached_collision_objects = [old]
-        req.scene.world.collision_objects = [box_object(self.OBJECT, self.dimensions, world)]
-        self.commit(req)
+        if self.show_workpiece:
+            req = self.diff()
+            old = AttachedCollisionObject()
+            old.link_name, old.object.id, old.object.operation = self.owner + '_gripper_tcp', self.OBJECT, CollisionObject.REMOVE
+            req.scene.robot_state.attached_collision_objects = [old]
+            req.scene.world.collision_objects = [box_object(self.OBJECT, self.dimensions, world)]
+            self.commit(req)
         self.owner, self.local_pose, self.world_pose = None, None, world
 
     def clear_after_manual_recovery(self):

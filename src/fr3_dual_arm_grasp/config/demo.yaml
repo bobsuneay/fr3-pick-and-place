@@ -8,6 +8,10 @@ workpiece:
   # Measure for your part and grasp. This is NOT a robot controller tool offset.
   right_tcp_to_object: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
 
+# Keep dimensions and TCP offset for grasp bookkeeping, but hide the part
+# from RViz and the MoveIt collision scene for this demo.
+show_workpiece_in_rviz: false
+
 # Donor withdraws along negative TCP Z; MoveIt rejects blocked paths.
 retreat_distance_m: 0.06
 # World +Z clearance above the taught placement point.

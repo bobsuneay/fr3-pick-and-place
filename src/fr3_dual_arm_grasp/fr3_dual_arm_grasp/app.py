@@ -74,7 +74,9 @@ class DemoApp(Node):
         if any(x <= 0 or x > 1 for x in dimensions):
             raise ValueError('Workpiece box dimensions must be in (0, 1] m')
         offset = pose_vector(config['workpiece']['right_tcp_to_object'])
-        self.scene = DemoScene(self, self.motion, scene, dimensions, offset)
+        self.scene = DemoScene(
+            self, self.motion, scene, dimensions, offset,
+            show_workpiece=config.get('show_workpiece_in_rviz', False))
         self.dwell = float(config.get('display_dwell_seconds', 2.0))
         if not 0 <= self.dwell <= 60:
             raise ValueError('Display dwell must be 0..60 seconds')
