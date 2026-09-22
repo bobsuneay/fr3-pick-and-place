@@ -492,7 +492,9 @@ def controllers(mode='gazebo', side=None):
             result[manager]['ros__parameters'][name] = {'type': kind}
         result[names[0]] = {'ros__parameters': {
             'joints': [f'{arm}_j{i}' for i in range(1, 7)] + gripper_joints,
-            'interfaces': ['position'], 'use_local_topics': False}}
+            # mock/real use separate managers. Keep their output private and
+            # merge it once so RViz, MoveIt and the UI share one complete feed.
+            'interfaces': ['position'], 'use_local_topics': mode != 'gazebo'}}
         result[names[1]] = {'ros__parameters': {
             'joints': [f'{arm}_j{i}' for i in range(1, 7)],
             'command_interfaces': ['position'], 'state_interfaces': ['position'],

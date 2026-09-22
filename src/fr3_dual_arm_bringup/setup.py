@@ -23,4 +23,7 @@ setup(
     maintainer_email='maintainer@example.com',
     description='Unified launch entry points for FR3 dual-arm deployment',
     license='MIT',
+    entry_points={'console_scripts': [
+        'joint_state_bridge = fr3_dual_arm_bringup.state_bridge:main',
+    ]},
 )

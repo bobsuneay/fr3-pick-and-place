@@ -46,6 +46,7 @@ class ContractTests(unittest.TestCase):
             self.assertEqual(hand.find("hardware/param[@name='block']").text, '1')
             self.assertEqual(root.find(f"joint[@name='{follower}']/mimic").get('joint'), master)
             c = controllers('real', side)
+            self.assertTrue(c[f'{side}_joint_state_broadcaster']['ros__parameters']['use_local_topics'])
             broadcast = c[f'{side}_joint_state_broadcaster']['ros__parameters']['joints']
             self.assertEqual(set(broadcast), interface_names)
             for name in (f'{side}_arm_controller', f'{side}_gripper_controller'):
@@ -65,6 +66,15 @@ class ContractTests(unittest.TestCase):
                 if mode == 'gazebo':
                     mimic = root.find(f"ros2_control/joint[@name='{side}_right_finger_joint']/param[@name='mimic']")
                     self.assertEqual(mimic.text, f'{side}_left_finger_joint')
+
+    def test_feedback_topics_are_private_only_with_independent_managers(self):
+        for side in ('left', 'right'):
+            self.assertTrue(controllers('mock', side)[f'{side}_joint_state_broadcaster']
+                            ['ros__parameters']['use_local_topics'])
+            self.assertTrue(controllers('real', side)[f'{side}_joint_state_broadcaster']
+                            ['ros__parameters']['use_local_topics'])
+            self.assertFalse(controllers('gazebo', side)[f'{side}_joint_state_broadcaster']
+                             ['ros__parameters']['use_local_topics'])
 
     def test_calibrated_limits_match_sdk_range(self):
         self.arms['gripper']['open_gap'] = 0.04

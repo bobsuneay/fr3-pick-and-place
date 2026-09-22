@@ -73,6 +73,8 @@ def start(context):
         parameters=[description],
         output='screen',
     )
+    joint_state_bridge = Node(
+        package='fr3_dual_arm_bringup', executable='joint_state_bridge', output='screen')
     move_group = Node(
         package='moveit_ros_move_group',
         executable='move_group',
@@ -156,7 +158,7 @@ def start(context):
                             'gripper actions end in /gripper_cmd. Model: ' + str(description_share))]
     if hardware['gripper']['block'] == 0:
         messages.append(LogInfo(msg='Legacy gripper.block=0 overridden to SDK non-blocking block=1.'))
-    return handlers + messages + [rsp] + managers + [spawners[0]]
+    return handlers + messages + [joint_state_bridge, rsp] + managers + [spawners[0]]
 
 
 def generate_launch_description():

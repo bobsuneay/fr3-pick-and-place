@@ -53,6 +53,8 @@ def start(context):
         parameters=[description],
         output='screen',
     )
+    joint_state_bridge = Node(
+        package='fr3_dual_arm_bringup', executable='joint_state_bridge', output='screen')
     move_group = Node(
         package='moveit_ros_move_group',
         executable='move_group',
@@ -126,7 +128,7 @@ def start(context):
             target_action=manager,
             on_exit=[EmitEvent(event=Shutdown(reason='required manager exited'))])))
 
-    return handlers + [rsp] + managers + [spawners[0], rviz]
+    return handlers + [joint_state_bridge, rsp] + managers + [spawners[0], rviz]
 
 
 def generate_launch_description():
