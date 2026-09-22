@@ -85,6 +85,9 @@ class DemoApp(Node):
                 self.load_error = str(exc)
                 self.status_text = '示教文件未载入：' + self.load_error
         self.latest_capture = None
+        # UI-selectable policy for ordinary taught points. Display and
+        # Cartesian approach/retreat segments remain TCP-based in both modes.
+        self.keypoint_motion_mode = 'joints'
         self.perception_candidate = None
         self.status_pub = self.create_publisher(String, '/grasp/status_text', 10)
         self.create_subscription(JointState, '/joint_states', self.on_joints, qos_profile_sensor_data)
@@ -143,6 +146,14 @@ class DemoApp(Node):
         self.motion.speed = value
         self.publish(f'速度 {percent:.0f}%：下一段规划生效，当前运动不突变')
 
+    def set_keypoint_motion_mode(self, mode):
+        if mode not in ('joints', 'tcp'):
+            raise ValueError('关键点模式必须是 joints 或 tcp')
+        if self.busy:
+            raise RuntimeError('流程运行中不能切换关键点模式')
+        self.keypoint_motion_mode = mode
+        self.publish('关键点运行模式：' + ('保存的 TCP 位姿反解' if mode == 'tcp' else '保存的关节角'))
+
     def switch_controllers(self, side, activate):
         if activate and not self.motion.enabled:
             return
@@ -197,7 +208,8 @@ class DemoApp(Node):
                                execution_enabled=self.motion.enabled,
                                awaiting_confirmation=self.awaiting_confirmation,
                                owner=self.scene.owner, recovery_required=self.recovery_required,
-                               motion_fault=self.motion.fault), ensure_ascii=False)
+                               motion_fault=self.motion.fault,
+                               keypoint_motion_mode=self.keypoint_motion_mode), ensure_ascii=False)
 
     def submit(self, label, function):
         if not self.operation_lock.acquire(blocking=False):
@@ -248,6 +260,10 @@ class DemoApp(Node):
         point = deepcopy(self.book.points[name])
         self.book.validate_point(point)
         sides = SIDES if side == 'both' else (side,)
+        if self.keypoint_motion_mode == 'tcp':
+            targets = {s: point[s]['tcp'] for s in sides}
+            return self.motion.poses(
+                targets, 'both_arms' if side == 'both' else side + '_arm', execute)
         targets = {f'{s}_j{i}': q for s in sides for i, q in enumerate(point[s]['joints'], 1)}
         return self.motion.joints(targets, 'both_arms' if side == 'both' else side + '_arm', execute)
 

@@ -23,6 +23,7 @@ class TeachUI:
         self.status = tk.StringVar()
         self.speed = tk.DoubleVar(value=app.motion.speed*100)
         self.speed_label = tk.StringVar()
+        self.keypoint_mode_label = tk.StringVar()
         self.feedback = tk.StringVar(value='等待 /joint_states')
         self.path = tk.StringVar(value=app.points_file)
         self.joints = [tk.StringVar(value='0') for _ in range(6)]
@@ -62,6 +63,12 @@ class TeachUI:
         ttk.Scale(speed_row, from_=1, to=30, variable=self.speed, command=self.change_speed).pack(side='left', fill='x', expand=True)
         ttk.Label(speed_row, textvariable=self.speed_label, width=48).pack(side='left')
         self.speed_label.set(f'{self.app.motion.speed:.0%} · 下一段规划生效')
+        self.point_mode_button = ttk.Button(
+            speed_row, textvariable=self.keypoint_mode_label,
+            command=lambda: self.attempt(self.toggle_keypoint_mode))
+        self.point_mode_button.pack(side='left', padx=8)
+        self.controls.append(self.point_mode_button)
+        self.update_keypoint_mode_label()
         ttk.Label(self.root, textvariable=self.feedback, padding=10, font=('TkFixedFont', 10)).pack(fill='x')
         status = ttk.LabelFrame(self.root, text='流程状态', padding=8)
         status.pack(fill='x', padx=10)
@@ -169,6 +176,15 @@ class TeachUI:
         percent = round(float(value))
         self.app.set_speed(percent)
         self.speed_label.set(f'{percent}% · 下一段规划生效')
+
+    def update_keypoint_mode_label(self):
+        label = ('TCP 位姿反解' if self.app.keypoint_motion_mode == 'tcp' else '保存的关节角')
+        self.keypoint_mode_label.set('关键点运行：' + label + '（点击切换）')
+
+    def toggle_keypoint_mode(self):
+        mode = 'tcp' if self.app.keypoint_motion_mode == 'joints' else 'joints'
+        self.app.set_keypoint_motion_mode(mode)
+        self.update_keypoint_mode_label()
 
     def selected(self):
         selected = self.tree.selection()

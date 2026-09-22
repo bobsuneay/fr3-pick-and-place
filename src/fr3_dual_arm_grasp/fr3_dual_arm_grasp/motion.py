@@ -230,22 +230,34 @@ class DualArmMoveIt:
         # Gripper path is planned too; there is no direct action/SDK bypass.
         return self.joints({side + '_left_finger_joint': gap / 2.0}, side + '_gripper', execute)
 
+    def poses(self, targets, group, execute=False):
+        """Plan one or both saved TCP targets through MoveIt's IK and OMPL."""
+        if not targets or any(side not in ('left', 'right') for side in targets):
+            raise ValueError('TCP targets must contain left and/or right')
+        constraints = Constraints()
+        positions, orientations = [], []
+        for side, values in targets.items():
+            target = pose_msg(values)
+            pc = PositionConstraint()
+            pc.header.frame_id, pc.link_name, pc.weight = 'world', side + '_gripper_tcp', 1.0
+            region = SolidPrimitive()
+            region.type, region.dimensions = SolidPrimitive.SPHERE, [0.001]
+            pc.constraint_region.primitives = [region]
+            pc.constraint_region.primitive_poses = [target]
+            oc = OrientationConstraint()
+            oc.header.frame_id, oc.link_name, oc.weight = 'world', side + '_gripper_tcp', 1.0
+            oc.orientation = target.orientation
+            oc.absolute_x_axis_tolerance = oc.absolute_y_axis_tolerance = oc.absolute_z_axis_tolerance = 0.01
+            positions.append(pc)
+            orientations.append(oc)
+        constraints.position_constraints = positions
+        constraints.orientation_constraints = orientations
+        return self._goal(group, constraints, execute)
+
     def pose(self, side, values, execute=False, linear=False):
         if linear:
             return self.linear(side, values, execute)
-        constraints = Constraints()
-        pc = PositionConstraint()
-        pc.header.frame_id, pc.link_name, pc.weight = 'world', side + '_gripper_tcp', 1.0
-        region = SolidPrimitive()
-        region.type, region.dimensions = SolidPrimitive.SPHERE, [0.001]
-        pc.constraint_region.primitives = [region]
-        pc.constraint_region.primitive_poses = [pose_msg(values)]
-        oc = OrientationConstraint()
-        oc.header.frame_id, oc.link_name, oc.weight = 'world', side + '_gripper_tcp', 1.0
-        oc.orientation = pose_msg(values).orientation
-        oc.absolute_x_axis_tolerance = oc.absolute_y_axis_tolerance = oc.absolute_z_axis_tolerance = 0.01
-        constraints.position_constraints, constraints.orientation_constraints = [pc], [oc]
-        return self._goal(side + '_arm', constraints, execute)
+        return self.poses({side: values}, side + '_arm', execute)
 
     def show(self, state, trajectory):
         msg = DisplayTrajectory()

@@ -132,3 +132,32 @@ def test_measured_target_failure_identifies_joint_and_error(motion, monkeypatch)
     monkeypatch.setattr(motion._test_module.time, 'monotonic', lambda: next(ticks))
     with pytest.raises(RuntimeError, match=r'right_j3: target=1.15 deg.*error=1.15 deg.*limit=0.86 deg'):
         motion.verify_targets({'right_j3': 0.02})
+
+
+def test_both_tcp_targets_form_one_both_arms_goal(motion, monkeypatch):
+    module = motion._test_module
+    def pose():
+        return SimpleNamespace(
+            position=SimpleNamespace(x=0.0, y=0.0, z=0.0),
+            orientation=SimpleNamespace(x=0.0, y=0.0, z=0.0, w=1.0))
+    monkeypatch.setattr(module, 'Pose', pose)
+    monkeypatch.setattr(module, 'Constraints', lambda: SimpleNamespace(
+        position_constraints=[], orientation_constraints=[]))
+    monkeypatch.setattr(module, 'PositionConstraint', lambda: SimpleNamespace(
+        header=SimpleNamespace(frame_id=''), link_name='', weight=0.0,
+        constraint_region=SimpleNamespace(primitives=[], primitive_poses=[])))
+    monkeypatch.setattr(module, 'OrientationConstraint', lambda: SimpleNamespace(
+        header=SimpleNamespace(frame_id=''), link_name='', weight=0.0,
+        orientation=None, absolute_x_axis_tolerance=0.0,
+        absolute_y_axis_tolerance=0.0, absolute_z_axis_tolerance=0.0))
+    monkeypatch.setattr(module, 'SolidPrimitive', type('Primitive', (), {'SPHERE': 2}))
+    captured = {}
+    motion._goal = lambda group, constraints, execute: captured.update(
+        group=group, constraints=constraints, execute=execute)
+    target = [0.4, 0.1, 0.8, 0.0, 0.0, 0.0, 1.0]
+    motion.poses({'left': target, 'right': target}, 'both_arms', True)
+    assert captured['group'] == 'both_arms' and captured['execute'] is True
+    assert [item.link_name for item in captured['constraints'].position_constraints] == [
+        'left_gripper_tcp', 'right_gripper_tcp']
+    assert [item.link_name for item in captured['constraints'].orientation_constraints] == [
+        'left_gripper_tcp', 'right_gripper_tcp']

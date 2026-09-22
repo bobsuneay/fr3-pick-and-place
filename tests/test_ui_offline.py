@@ -33,9 +33,11 @@ def test_panel_builds_and_formats_measured_feedback(monkeypatch):
                               scene=SimpleNamespace(owner=None), points_file='test.json', feedback=feedback,
                               status_text='test', book=book, latest_capture=point, open_gap=0.1,
                               busy=False, awaiting_confirmation='', teaching=SimpleNamespace(state='motion'),
+                              keypoint_motion_mode='joints',
                               live_poses={s: point[s]['tcp'] for s in ('left', 'right')},
                               live_pose_error='', live_stamp=__import__('time').monotonic(),
-                              set_speed=lambda percent: None)
+                              set_speed=lambda percent: None,
+                              set_keypoint_motion_mode=lambda mode: setattr(app, 'keypoint_motion_mode', mode))
         panel = ui.TeachUI(root, app)
         root.update_idletasks()
         assert 'TCP mm [500.00' in panel.feedback.get()
@@ -44,6 +46,9 @@ def test_panel_builds_and_formats_measured_feedback(monkeypatch):
         assert panel.tcp[0].get() == '500.000'
         assert len(panel.tree.get_children()) == 7
         assert str(panel.continue_button['state']) == 'disabled'
+        panel.toggle_keypoint_mode()
+        assert app.keypoint_motion_mode == 'tcp'
+        assert 'TCP' in panel.keypoint_mode_label.get()
         app.busy, app.awaiting_confirmation = True, 'confirm'
         panel.refresh()
         assert all(str(button['state']) == 'disabled' for button in panel.controls)
