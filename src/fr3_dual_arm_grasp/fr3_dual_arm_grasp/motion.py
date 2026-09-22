@@ -195,13 +195,35 @@ class DualArmMoveIt:
         return result
 
     def verify_targets(self, targets):
-        deadline = time.monotonic() + 2.0
+        # The vendor controller can report trajectory completion before the
+        # measured joints have finished settling. Keep the independent safety
+        # check, but allow a short settling window and identify every offender.
+        deadline = time.monotonic() + 5.0
         while True:
             values = self.guard()
-            if all(abs(values[n]-v) <= (0.0006 if 'finger' in n else 0.015) for n, v in targets.items()):
+            errors = [(name, float(target), float(values[name]),
+                       abs(float(values[name])-float(target)),
+                       0.0006 if 'finger' in name else 0.015)
+                      for name, target in targets.items()]
+            failed = [item for item in errors if item[3] > item[4]]
+            if not failed:
                 return
             if time.monotonic() > deadline:
-                raise RuntimeError('Controller success but measured target was not reached')
+                details = []
+                for name, target, actual, error, limit in sorted(
+                        failed, key=lambda item: item[3], reverse=True):
+                    if 'finger' in name:
+                        details.append(
+                            f'{name}: target={target*1000:.2f} mm, '
+                            f'measured={actual*1000:.2f} mm, '
+                            f'error={error*1000:.2f} mm, limit={limit*1000:.2f} mm')
+                    else:
+                        details.append(
+                            f'{name}: target={math.degrees(target):.2f} deg, '
+                            f'measured={math.degrees(actual):.2f} deg, '
+                            f'error={math.degrees(error):.2f} deg, '
+                            f'limit={math.degrees(limit):.2f} deg')
+                raise RuntimeError('Measured target not reached after 5 s; ' + '; '.join(details))
             time.sleep(0.05)
 
     def gripper(self, side, gap, execute=False):

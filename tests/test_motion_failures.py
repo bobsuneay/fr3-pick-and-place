@@ -36,6 +36,7 @@ def motion(monkeypatch):
     result.lock = threading.Lock()
     result.active, result.fault, result.enabled = None, False, True
     result.feedback = SimpleNamespace(snapshot=lambda: {})
+    result._test_module = module
     return result
 
 
@@ -123,3 +124,11 @@ def test_stop_during_server_discovery_prevents_dispatch(motion):
     endpoint = SimpleNamespace(wait_for_server=discovery, send_goal_async=forbidden)
     with pytest.raises(RuntimeError, match='Cancelled'):
         motion._action(endpoint, object(), True)
+
+
+def test_measured_target_failure_identifies_joint_and_error(motion, monkeypatch):
+    motion.guard = lambda execute=False: {'right_j3': 0.0}
+    ticks = iter([10.0, 16.0])
+    monkeypatch.setattr(motion._test_module.time, 'monotonic', lambda: next(ticks))
+    with pytest.raises(RuntimeError, match=r'right_j3: target=1.15 deg.*error=1.15 deg.*limit=0.86 deg'):
+        motion.verify_targets({'right_j3': 0.02})
