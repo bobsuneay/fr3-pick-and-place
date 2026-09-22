@@ -145,7 +145,7 @@ ros2 launch fr3_dual_arm_bringup pick_place.launch.py \
 
 抓取时夹爪命令完全闭合，由 `hardware.yaml` 的夹持力限制停止。实际开度连续稳定并落在 `demo.yaml` 的允许范围后，流程自动继续；右手只在左手也通过检查后松开。该判断依赖开度，不等同于触觉或掉落检测。
 
-交接时以右手实时 `gripper_tcp` 的 Z 中心轴为基准，自动把示教的左手接取 TCP 投影到该中心线上，并把左手 Z 轴调整为与右手反向；示教点只提供轴向间距和左手绕中心轴的滚转参考。修正后的目标仍通过 MoveIt 求逆解、OMPL 和碰撞检测。到位后按默认 5 mm、5° 容差复核；复核失败时左夹爪不会闭合，右夹爪也不会松开。
+交接时以右手实时 `gripper_tcp` 的 Z 中心轴为基准，自动生成并修正左手接取 TCP；交接中心和左右间距来自 `demo.yaml`，不再从示教文件读取左手接取点。左手 Z 轴自动调整为与右手反向，修正后的目标通过 MoveIt 求逆解、OMPL 和碰撞检测；到位后按默认 5 mm、5° 容差复核。
 
 ### 6.1 实机夹爪参数
 
@@ -190,7 +190,7 @@ workpiece:
 | 9 | `scan right right_display` | 右手先用 OMPL 到头部相机光轴中心前 30 cm 的展示中心，再按 fr3-sim5 的 18 个相对视角绕零件中心插值旋转；每个视角返回中性姿态。 |
 | 10 | `move both handover_ready` | 双臂以 `both_arms` 同时规划到交接预备位，避免分别规划造成另一只手成为动态障碍。 |
 | 11 | `touch left` | 若启用零件碰撞体，临时允许左右手指与零件接触；默认隐藏零件时仅更新流程接触状态。 |
-| 12 | `receive left left_receive` | 读取右手实时 TCP，以其 Z 轴作为中心线；保留示教的轴向间距和左手滚转参考，自动消除左手横向偏差并令两条 Z 轴反向。修正目标通过左臂 IK、OMPL 和碰撞检测后执行，右臂保持不动。 |
+| 12 | `receive left left_receive` | 根据 `handover_center_xyz` 和 `handover_separation_m` 生成交接目标，再读取右手实时 TCP 自动修正左手中心线。修正目标通过左臂 IK、OMPL 和碰撞检测后执行，右臂保持不动。 |
 | 13 | `grasp left left_receive` | 到位后复核中心线横向误差 ≤5 mm、角度误差 ≤5°；通过后左夹爪完全闭合并按实际开度自动确认。失败时右手继续夹持。 |
 | 14 | `transfer left` | 只有左夹爪确认成功后，软件持有者才从右手切换为左手。 |
 | 15 | `grip right right_pregrasp` | 右夹爪张开到预抓取点保存的开度，正式释放零件。 |

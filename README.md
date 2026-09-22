@@ -4,10 +4,10 @@
 
 **完整安装、示教与实机操作：[PICK_PLACE_DEMO.md](docs/PICK_PLACE_DEMO.md)**
 
-- 原生中文界面：双臂关节角、TCP、夹爪开度、16 个关键点采集与保存。
+- 原生中文界面：双臂关节角、TCP、夹爪开度；仅采集 `ready`、`right_pregrasp`、`left_place` 三个核心点。
 - 关节、TCP、MoveL、夹爪运动经 MoveIt 规划；可先预览再执行。
 - 右手抓取 → 多角度展示 → 左手接取 → 多角度展示 → 放下。
-- 包含双臂、夹爪、支架、桌面和被抓零件的模型碰撞检测；交接前确认左手夹稳。
+- 包含双臂、夹爪、支架和桌面碰撞检测；抓取和交接使用夹爪实际开度自动确认。
 - 保留已校准的双臂/夹爪/support 参数；默认仅头部相机，完整相机配置有备份。
 - 默认禁止执行。没有预填实机运动点，必须现场示教；零件和桌面参数需核对。
 
@@ -25,7 +25,7 @@ ros2 launch fr3_dual_arm_bringup pick_place.launch.py \
   mode:=real hardware:=$HOME/fr3_dual_arm.hardware.yaml enable_execution:=false
 ```
 
-完整 demo 前需完成全部关键点，核对桌面、零件包围盒和 TCP 偏移，并配置 `demo.yaml`。实机仍使用基础工程的厂商 SDK 与补丁，SDK 不随 Git 仓库上传，需从原工程复制。
+完整 demo 前需完成 3 个核心点，核对桌面、竖直圆柱零件（高 35 mm、直径 16 mm）和 TCP 偏移，并配置 `demo.yaml`。抓取 TCP 自动生成在桌面上方 15 mm。实机仍使用基础工程的厂商 SDK 与补丁，SDK 不随 Git 仓库上传，需从原工程复制。
 
 本次通过 Python 编译检查和离线测试（含 Tk 界面构造、流程失败/取消、标定与相机回归）。**尚未进行 ROS 2 在线运行及实机验收**，步骤见完整说明。
 
