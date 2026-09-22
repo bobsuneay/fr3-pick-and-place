@@ -18,6 +18,7 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 import yaml
+from ament_index_python.packages import get_package_share_directory
 
 from .teach_model import (Feedback, TeachBook, captured_point, model_fingerprint,
                           finite_vector, pose_vector, SIDES)
@@ -31,8 +32,15 @@ from .teaching import TeachingMode, robot_mode
 class DemoApp(Node):
     def __init__(self):
         super().__init__('fr3_teach_demo')
+        share = Path(get_package_share_directory('fr3_dual_arm_grasp'))
+        default_points = share / 'config/teach_points.json'
+        for parent in share.parents:
+            source_config = parent / 'src/fr3_dual_arm_grasp/config'
+            if source_config.is_dir():
+                default_points = source_config / 'teach_points.json'
+                break
         for key, value in [('arms_file', ''), ('scene_file', ''), ('demo_config', ''),
-                           ('points_file', '~/.ros/fr3_demo/teach_points.json'),
+                           ('points_file', str(default_points)),
                            ('enable_execution', False), ('speed', 0.1), ('mode', 'mock'), ('hardware', '')]:
             self.declare_parameter(key, value)
         param = lambda key: self.get_parameter(key).value

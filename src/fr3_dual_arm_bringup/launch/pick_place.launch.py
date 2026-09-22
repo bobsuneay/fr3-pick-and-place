@@ -9,6 +9,15 @@ from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
 
+def project_config(share, package, name):
+    """Prefer this workspace's source config; support install-only deployments."""
+    for parent in share.parents:
+        directory = parent / 'src' / package / 'config'
+        if directory.is_dir():
+            return directory / name
+    return share / 'config' / name
+
+
 def start(context):
     arg = lambda name: LaunchConfiguration(name).perform(context)
     mode = arg('mode')
@@ -45,10 +54,11 @@ def generate_launch_description():
     defaults = {
         'mode': 'mock', 'enable_execution': 'false', 'hardware': '', 'rviz': 'true',
         'camera_topic': '',
-        'gui': 'true', 'speed': '0.1', 'points': '~/.ros/fr3_demo/teach_points.json',
-        'scene': str(description / 'config/scene.yaml'),
-        'arms': str(description / 'config/arms.yaml'),
-        'demo_config': str(grasp / 'config/demo.yaml'),
+        'gui': 'true', 'speed': '0.1',
+        'points': str(project_config(grasp, 'fr3_dual_arm_grasp', 'teach_points.json')),
+        'scene': str(project_config(description, 'fr3_dual_arm_description', 'scene.yaml')),
+        'arms': str(project_config(description, 'fr3_dual_arm_description', 'arms.yaml')),
+        'demo_config': str(project_config(grasp, 'fr3_dual_arm_grasp', 'demo.yaml')),
     }
     return LaunchDescription([DeclareLaunchArgument(k, default_value=v) for k, v in defaults.items()] +
                              [OpaqueFunction(function=start)])

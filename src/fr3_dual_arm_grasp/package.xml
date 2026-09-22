@@ -7,6 +7,7 @@
   <license>MIT</license>
 
   <exec_depend>controller_manager_msgs</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>sensor_msgs_py</exec_depend>

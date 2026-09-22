@@ -115,17 +115,16 @@ ros2 launch fr3_dual_arm_grasp grasp.launch.py enable_execution:=false
 
 旧 16 点文件中已取消的点可载入但不再参与流程；首次更新建议另存为新文件保留原记录。
 
-默认自动保存到 `~/.ros/fr3_demo/teach_points.json`。文件包含 arms/scene 配置内容哈希，不允许跨不同安装标定或相机场景直接回放。旧 SDK JSON 的 mm/degree 与新 schema 不兼容，需重新采集。载入失败时不会悄悄覆盖旧文件；选择“另存为”以创建新文件。
+默认自动保存到当前工程源码目录的 `src/fr3_dual_arm_grasp/config/teach_points.json`，不使用 `~/.ros`。默认的 arms、scene 和 demo 配置也优先从本工作空间 `src/` 读取；安装时不带源码的部署才回退到对应包的 `install/.../share/.../config/`。示教文件包含 arms/scene 配置内容哈希，不允许跨不同安装标定或相机场景直接回放。旧 SDK JSON 的 mm/degree 与新 schema 不兼容，需重新采集。载入失败时不会悄悄覆盖旧文件；选择“另存为”以创建新文件。
 
 ## 6. 工作台和零件包围盒
 
 `scene.yaml` 保留原基础工程的桌面示例；**双臂和支架已标定不代表桌面和零件也已核对。** 默认桌面中心 `[0.48, 0] m`、尺寸 `0.7 × 2.0 m`、台面高 `0.75 m`。按现场更新副本并通过 `scene:=...` 传入。
 
-复制 `src/fr3_dual_arm_grasp/config/demo.yaml` 到用户配置目录：
+现场参数直接维护在项目配置中：
 
 ```bash
-mkdir -p ~/.ros/fr3_demo
-cp src/fr3_dual_arm_grasp/config/demo.yaml ~/.ros/fr3_demo/demo.yaml
+nano src/fr3_dual_arm_grasp/config/demo.yaml
 ```
 
 填写实际 `workpiece.dimensions_m` 与抓取时的 `right_tcp_to_object`（TCP 到零件包围盒中心的变换），核对后设置 `scene_and_object_verified: true`。默认值仅为示例，完整 demo 默认拒绝运行。再启动：
@@ -133,7 +132,6 @@ cp src/fr3_dual_arm_grasp/config/demo.yaml ~/.ros/fr3_demo/demo.yaml
 ```bash
 ros2 launch fr3_dual_arm_bringup pick_place.launch.py \
   mode:=real hardware:=$HOME/fr3_dual_arm.hardware.yaml \
-  demo_config:=$HOME/.ros/fr3_demo/demo.yaml \
   enable_execution:=true speed:=0.1
 ```
 
