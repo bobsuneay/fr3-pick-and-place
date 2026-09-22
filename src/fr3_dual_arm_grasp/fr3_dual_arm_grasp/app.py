@@ -103,7 +103,7 @@ class DemoApp(Node):
         self.dwell = float(config.get('display_dwell_seconds', 2.0))
         if not 0 <= self.dwell <= 60:
             raise ValueError('Display dwell must be 0..60 seconds')
-        self.display_distance = float(config.get('display_distance_m', 0.40))
+        self.display_distance = float(config.get('display_distance_m', 0.30))
         if not 0.1 <= self.display_distance <= 1.0:
             raise ValueError('Display distance must be 0.1..1.0 m')
         self.retreat_distance = float(config.get('retreat_distance_m', 0.06))
