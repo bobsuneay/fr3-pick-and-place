@@ -118,7 +118,7 @@ ros2 launch fr3_dual_arm_grasp grasp.launch.py enable_execution:=false
 
 ## 6. 工作台和零件包围盒
 
-`scene.yaml` 保留原基础工程的桌面示例；**双臂和支架已标定不代表桌面和零件也已核对。** 默认桌面中心 `[0.48, 0] m`、尺寸 `0.7 × 0.65 m`、台面高 `0.75 m`。按现场更新副本并通过 `scene:=...` 传入。
+`scene.yaml` 保留原基础工程的桌面示例；**双臂和支架已标定不代表桌面和零件也已核对。** 默认桌面中心 `[0.48, 0] m`、尺寸 `0.7 × 2.0 m`、台面高 `0.75 m`。按现场更新副本并通过 `scene:=...` 传入。
 
 复制 `src/fr3_dual_arm_grasp/config/demo.yaml` 到用户配置目录：
 
