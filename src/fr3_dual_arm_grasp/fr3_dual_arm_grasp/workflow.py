@@ -15,11 +15,13 @@ def run_workflow(app):
     for index, (kind, side, key) in enumerate(recipe(), 1):
         app.motion.guard(True)
         app.publish(f'{index}/{len(recipe())} {kind} {side} {key}')
-        if kind in ('move', 'view'):
+        if kind in ('move', 'view', 'approach', 'lift'):
             if key == 'left_place':
                 # Workpiece/table contact is intentional only for placement.
                 app.scene.allow(['left'], table=True)
-            app.move_point(key, side, execute=True)
+            app.move_point(
+                key, side, execute=True,
+                linear=kind in ('approach', 'lift'))
             if kind == 'view':
                 if app.stop_event.wait(app.dwell):
                     raise RuntimeError('Cancelled during display')

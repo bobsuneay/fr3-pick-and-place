@@ -164,9 +164,9 @@ def recipe():
     return [
         ('move', 'both', 'ready'),
         ('grip', 'right', 'right_pregrasp'), ('grip', 'left', 'ready'),
-        ('move', 'right', 'right_pregrasp'), ('move', 'right', 'right_grasp'),
+        ('move', 'right', 'right_pregrasp'), ('approach', 'right', 'right_grasp'),
         ('grip', 'right', 'right_grasp'), ('confirm', 'right', '确认右手已夹稳零件'),
-        ('attach', 'right', ''), ('move', 'right', 'right_pregrasp'),
+        ('attach', 'right', ''), ('lift', 'right', 'right_pregrasp'),
         ('scan', 'right', 'right_display'),
         ('move', 'both', 'handover_ready'), ('touch', 'left', ''),
         ('move', 'left', 'left_receive'), ('grip', 'left', 'left_receive'),

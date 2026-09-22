@@ -261,7 +261,7 @@ class DemoApp(Node):
             self.book.save(self.points_file)
         return point
 
-    def move_point(self, name, side, execute=False):
+    def move_point(self, name, side, execute=False, linear=False):
         self.initialize_scene()
         if name == 'right_display':
             if side == 'both':
@@ -270,6 +270,10 @@ class DemoApp(Node):
         point = deepcopy(self.book.points[name])
         self.book.validate_point(point)
         sides = SIDES if side == 'both' else (side,)
+        if linear:
+            if side == 'both':
+                raise ValueError('Cartesian keypoint motion supports one arm at a time')
+            return self.motion.pose(side, point[side]['tcp'], execute, linear=True)
         if self.keypoint_motion_mode == 'tcp':
             targets = {s: point[s]['tcp'] for s in sides}
             return self.motion.poses(

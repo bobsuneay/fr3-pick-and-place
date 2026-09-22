@@ -147,7 +147,7 @@ class FakeApp:
         self.event('detach')
         self.scene.owner = None
 
-    def move_point(self, key, side, execute):
+    def move_point(self, key, side, execute, linear=False):
         self.event('move', side, key)
 
     def initialize_scene(self):

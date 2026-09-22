@@ -345,5 +345,15 @@ class DualArmMoveIt:
             goal = ExecuteTrajectory.Goal()
             goal.trajectory = trajectory
             self._action(self.execute, goal, True)
-            self.verify_targets(dict(zip(trajectory.joint_trajectory.joint_names, points[-1].positions)))
+            final_joints = dict(zip(
+                trajectory.joint_trajectory.joint_names,
+                points[-1].positions))
+            try:
+                self.verify_targets(final_joints)
+            except RuntimeError as joint_error:
+                if not self.verify_tcp_targets({side: waypoints[-1]}):
+                    raise
+                self.node.get_logger().warning(
+                    'Cartesian TCP reached despite joint feedback mismatch; '
+                    'continuing: %s', joint_error)
         return trajectory
