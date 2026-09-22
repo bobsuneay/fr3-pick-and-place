@@ -13,7 +13,8 @@ sys.path.insert(0, str(ROOT / 'src/fr3_dual_arm_grasp'))
 sys.path.insert(0, str(ROOT / 'src/fr3_dual_arm_description'))
 from fr3_dual_arm_grasp.teach_model import (
     Feedback, TeachBook, MEASURED, SLOTS, recipe, gap_to_percent,
-    percent_to_gap, captured_point, model_fingerprint)
+    percent_to_gap, captured_point, model_fingerprint,
+    validate_handover_centerline)
 from fr3_dual_arm_grasp.workflow import run_workflow
 from fr3_dual_arm_description.model import build_model, semantic, read_yaml
 
@@ -27,6 +28,8 @@ def book():
     result = TeachBook('model-test', 0.1)
     for name in SLOTS:
         result.record(name, point())
+    # Receiver faces the donor on the same TCP Z centerline.
+    result.points['left_receive']['left']['tcp'][3:] = [1.0, 0.0, 0.0, 0.0]
     result.points['right_pregrasp']['right']['gap_m'] = 0.1
     result.points['ready']['left']['gap_m'] = 0.1
     return result
@@ -105,13 +108,23 @@ def test_missing_points_and_inconsistent_handover():
         b.validate_complete()
 
 
+def test_handover_requires_collinear_opposing_gripper_axes():
+    right = [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+    left = [0.0, 0.0, 1.1, 1.0, 0.0, 0.0, 0.0]
+    lateral, angle = validate_handover_centerline(left, right)
+    assert lateral == pytest.approx(0.0)
+    assert angle == pytest.approx(0.0)
+    left[0] = 0.01
+    with pytest.raises(ValueError, match='centerlines'):
+        validate_handover_centerline(left, right)
+
+
 class FakeApp:
-    def __init__(self, fail_at=None, confirmation_stop=False):
+    def __init__(self, fail_at=None):
         self.book = book()
         self.events = []
         self.stop_event = threading.Event()
         self.recovery_required = False
-        self.awaiting_confirmation = ''
         self.dwell = 0
         self.fail_at = fail_at
         self.motion = SimpleNamespace(guard=self.guard, gripper=self.grip)
@@ -119,13 +132,6 @@ class FakeApp:
                                      attach=self.attach, detach=self.detach,
                                      set_touch=lambda sides: self.event('touch', *sides),
                                      allow=lambda sides, table=False: self.event('allow', str(table)))
-        def confirm(timeout):
-            if confirmation_stop:
-                self.stop_event.set()
-                return False
-            self.event('confirmed')
-            return True
-        self.confirm_event = SimpleNamespace(clear=lambda: None, wait=confirm)
 
     def guard(self, execute=True):
         if self.stop_event.is_set():
@@ -138,6 +144,12 @@ class FakeApp:
 
     def grip(self, side, gap, execute=True):
         self.event('grip', side, gap)
+
+    def verify_grasp(self, side):
+        self.event('grasp_ok', side)
+
+    def verify_handover_alignment(self):
+        self.event('handover_aligned')
 
     def attach(self, side, transfer=False):
         self.event('transfer' if transfer else 'attach', side)
@@ -156,6 +168,9 @@ class FakeApp:
     def scan_display(self, side):
         self.event('scan', side)
 
+    def move_handover_receive(self):
+        self.event('move', 'left', 'left_receive')
+
     def retreat_donor(self):
         self.event('retreat', 'right')
 
@@ -166,20 +181,21 @@ class FakeApp:
         pass
 
 
-def test_recipe_releases_donor_only_after_receiver_confirmation_and_transfer():
+def test_recipe_releases_donor_only_after_automatic_receiver_grasp_and_transfer():
     app = FakeApp()
     run_workflow(app)
     e = app.events
-    close_left = e.index(('grip', 'left', 0.02))
+    close_left = e.index(('grip', 'left', 0.0))
     transfer = e.index(('transfer', 'left'))
     release_right = e.index(('grip', 'right', 0.1), transfer)
-    assert close_left < e.index(('confirmed',), close_left) < transfer < release_right
+    assert close_left < e.index(('grasp_ok', 'left'), close_left) < transfer < release_right
     assert e.index(('grip', 'left', 0.1), transfer) < e.index(('detach',))
     assert app.scene.owner is None and not app.recovery_required
 
 
 @pytest.mark.parametrize('failure', [
-    ('grip', 'left', 0.02), ('transfer', 'left'), ('move', 'left', 'left_receive'),
+    ('grip', 'left', 0.0), ('grasp_ok', 'left'), ('transfer', 'left'),
+    ('move', 'left', 'left_receive'),
 ])
 def test_handover_failure_never_opens_donor(failure):
     app = FakeApp(fail_at=failure)
@@ -191,14 +207,6 @@ def test_handover_failure_never_opens_donor(failure):
     assert ('detach',) not in app.events
     with pytest.raises(RuntimeError, match='Recover'):
         run_workflow(app)
-
-
-def test_stop_while_confirming_does_not_attach_or_continue():
-    app = FakeApp(confirmation_stop=True)
-    with pytest.raises(RuntimeError, match='cancelled'):
-        run_workflow(app)
-    assert ('attach', 'right') not in app.events
-    assert app.recovery_required
 
 
 def test_head_only_and_full_camera_backup_preserve_mechanical_calibration():

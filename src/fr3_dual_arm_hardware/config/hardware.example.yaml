@@ -9,6 +9,9 @@ right:
   gripper_index: 2
 gripper:
   vel: 50
+  # TG-9801 single-finger target. Converted to MoveGripper force percent.
+  force_n: 10.0
+  rated_force_n: 20.0
   force: 50
   maxtime: 30000
   # SDK 1 = non-blocking; real launch also normalizes old block: 0 files to 1.

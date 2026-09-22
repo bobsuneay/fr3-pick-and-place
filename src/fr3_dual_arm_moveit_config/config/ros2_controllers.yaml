@@ -70,8 +70,8 @@ left_gripper_controller:
     joint: left_left_finger_joint
     goal_tolerance: 0.0005
     max_effort: 0.0
-    allow_stalling: false
-    stall_timeout: 2.0
+    allow_stalling: true
+    stall_timeout: 1.0
     stall_velocity_threshold: 0.0001
 
 right_gripper_controller:
@@ -79,6 +79,6 @@ right_gripper_controller:
     joint: right_left_finger_joint
     goal_tolerance: 0.0005
     max_effort: 0.0
-    allow_stalling: false
-    stall_timeout: 2.0
+    allow_stalling: true
+    stall_timeout: 1.0
     stall_velocity_threshold: 0.0001

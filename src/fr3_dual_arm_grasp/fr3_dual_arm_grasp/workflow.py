@@ -27,6 +27,8 @@ def run_workflow(app):
                     raise RuntimeError('Cancelled during display')
         elif kind == 'scan':
             app.scan_display(side)
+        elif kind == 'receive':
+            app.move_handover_receive()
         elif kind == 'retreat':
             app.retreat_donor()
         elif kind in ('preplace', 'place'):
@@ -35,15 +37,13 @@ def run_workflow(app):
             app.place_move(above=(kind == 'preplace'))
         elif kind == 'grip':
             app.motion.gripper(side, app.book.points[key][side]['gap_m'], execute=True)
-        elif kind == 'confirm':
-            app.confirm_event.clear()
-            app.awaiting_confirmation = key
-            app.publish(key)
-            try:
-                while not app.confirm_event.wait(0.1):
-                    app.motion.guard(True)
-            finally:
-                app.awaiting_confirmation = ''
+        elif kind == 'grasp':
+            if side == 'left':
+                app.verify_handover_alignment()
+            # Command the physical closed endpoint; the gripper's internal
+            # force limit stops on the part and ROS accepts the stable stall.
+            app.motion.gripper(side, 0.0, execute=True)
+            app.verify_grasp(side)
         elif kind in ('attach', 'transfer'):
             app.scene.attach(side, transfer=(kind == 'transfer'))
         elif kind == 'touch':

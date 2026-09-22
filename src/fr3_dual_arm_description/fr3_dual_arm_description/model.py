@@ -58,6 +58,15 @@ def validate_hardware(cfg):
     if cfg['left']['robot_ip'] == cfg['right']['robot_ip']:
         raise ValueError('Left and right IPs must differ on this host')
     g = cfg['gripper']
+    force_n = float(g.get('force_n', 10.0))
+    rated_force_n = float(g.get('rated_force_n', 20.0))
+    if not 0.02 <= force_n <= rated_force_n or rated_force_n <= 0:
+        raise ValueError('Invalid gripper.force_n/rated_force_n')
+    # FAIRINO MoveGripper accepts a torque percentage, while the TG-9801
+    # setting is specified to operators in newtons. Existing hardware files
+    # without the new fields therefore default to the requested 10 N / 50%.
+    g['force_n'], g['rated_force_n'] = force_n, rated_force_n
+    g['force'] = max(1, min(100, round(100.0 * force_n / rated_force_n)))
     for key, low, high in (('vel', 1, 100), ('force', 1, 100),
                            ('maxtime', 1, 30000), ('block', 0, 1),
                            ('open_pos', 0, 100), ('closed_pos', 0, 100)):
@@ -502,8 +511,8 @@ def controllers(mode='gazebo', side=None):
             'constraints': {'goal_time': 2.0, 'stopped_velocity_tolerance': 0.05}}}
         result[names[2]] = {'ros__parameters': {
             'joint': f'{arm}_left_finger_joint', 'goal_tolerance': 0.0005,
-            'max_effort': 0.0, 'allow_stalling': False,
-            'stall_velocity_threshold': 0.0001, 'stall_timeout': 2.0}}
+            'max_effort': 0.0, 'allow_stalling': True,
+            'stall_velocity_threshold': 0.0001, 'stall_timeout': 1.0}}
     return result
 
 

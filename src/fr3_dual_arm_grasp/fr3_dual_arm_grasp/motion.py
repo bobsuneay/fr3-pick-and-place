@@ -180,9 +180,9 @@ class DualArmMoveIt:
             self.show(result.trajectory_start, result.planned_trajectory)
         return result
 
-    def joints(self, targets, group, execute=False):
+    def joints(self, targets, group, execute=False, verify=True):
         expected_tcp = None
-        if execute:
+        if execute and verify:
             # Some Fairino firmware reports a successful trajectory while its
             # joint feedback uses a different calibration/ordering.  Keep the
             # target TCP as the independent execution check.
@@ -198,7 +198,7 @@ class DualArmMoveIt:
             jc.tolerance_above = jc.tolerance_below = 0.0002 if 'finger' in name else 0.002
             constraint.joint_constraints.append(jc)
         result = self._goal(group, constraint, execute)
-        if execute:
+        if execute and verify:
             try:
                 self.verify_targets(targets)
             except RuntimeError as joint_error:
@@ -264,7 +264,11 @@ class DualArmMoveIt:
 
     def gripper(self, side, gap, execute=False):
         # Gripper path is planned too; there is no direct action/SDK bypass.
-        return self.joints({side + '_left_finger_joint': gap / 2.0}, side + '_gripper', execute)
+        # A zero-gap adaptive grasp intentionally stalls on the part, so its
+        # success is checked from the measured opening by the workflow.
+        return self.joints(
+            {side + '_left_finger_joint': gap / 2.0},
+            side + '_gripper', execute, verify=gap > 1e-6)
 
     def poses(self, targets, group, execute=False):
         """Plan one or both saved TCP targets through MoveIt's IK and OMPL."""

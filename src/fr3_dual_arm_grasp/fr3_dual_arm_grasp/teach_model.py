@@ -24,6 +24,37 @@ LEGACY_SLOTS = {'right_lift', 'right_view_1', 'right_view_2', 'right_retreat',
                 'left_display', 'left_view_1', 'left_view_2', 'left_preplace', 'left_retreat'}
 
 
+def tcp_z_axis(pose):
+    x, y, z, w = pose_vector(pose)[3:]
+    return [2.0 * (x*z + y*w),
+            2.0 * (y*z - x*w),
+            1.0 - 2.0 * (x*x + y*y)]
+
+
+def handover_centerline_error(left_pose, right_pose):
+    """Return lateral axis separation [m] and opposing-axis angle [rad]."""
+    left_axis, right_axis = tcp_z_axis(left_pose), tcp_z_axis(right_pose)
+    opposing = max(-1.0, min(1.0, -sum(a*b for a, b in zip(left_axis, right_axis))))
+    angle = math.acos(opposing)
+    delta = [float(left_pose[i]) - float(right_pose[i]) for i in range(3)]
+    axial = sum(a*b for a, b in zip(delta, right_axis))
+    lateral = math.sqrt(sum((d - axial*a) ** 2 for d, a in zip(delta, right_axis)))
+    return lateral, angle
+
+
+def validate_handover_centerline(left_pose, right_pose,
+                                 lateral_tolerance=0.005,
+                                 angular_tolerance=math.radians(5.0)):
+    lateral, angle = handover_centerline_error(left_pose, right_pose)
+    if lateral > lateral_tolerance or angle > angular_tolerance:
+        raise ValueError(
+            'Handover gripper centerlines do not coincide: '
+            f'lateral={lateral*1000:.1f} mm (limit {lateral_tolerance*1000:.1f}), '
+            f'angle={math.degrees(angle):.1f} deg '
+            f'(limit {math.degrees(angular_tolerance):.1f})')
+    return lateral, angle
+
+
 
 def finite_vector(value, length, label):
     if not isinstance(value, (list, tuple)) or len(value) != length:
@@ -165,17 +196,15 @@ def recipe():
         ('move', 'both', 'ready'),
         ('grip', 'right', 'right_pregrasp'), ('grip', 'left', 'ready'),
         ('move', 'right', 'right_pregrasp'), ('approach', 'right', 'right_grasp'),
-        ('grip', 'right', 'right_grasp'), ('confirm', 'right', '确认右手已夹稳零件'),
+        ('grasp', 'right', 'right_grasp'),
         ('attach', 'right', ''), ('lift', 'right', 'right_pregrasp'),
         ('scan', 'right', 'right_display'),
         ('move', 'both', 'handover_ready'), ('touch', 'left', ''),
-        ('move', 'left', 'left_receive'), ('grip', 'left', 'left_receive'),
-        ('confirm', 'left', '确认左手已夹稳；继续后右手将松开'),
+        ('receive', 'left', 'left_receive'), ('grasp', 'left', 'left_receive'),
         ('transfer', 'left', ''), ('grip', 'right', 'right_pregrasp'),
         ('retreat', 'right', ''), ('touch_only', 'left', ''),
         ('move', 'right', 'ready'), ('scan', 'left', 'right_display'),
         ('preplace', 'left', ''), ('place', 'left', ''),
-        ('confirm', 'left', '确认零件已到达放置位置；继续后左手将松开'),
         ('grip', 'left', 'ready'), ('detach', 'left', ''),
         ('preplace', 'left', ''), ('move', 'left', 'ready'),
     ]

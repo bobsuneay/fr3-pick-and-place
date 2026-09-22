@@ -33,6 +33,8 @@ class ContractTests(unittest.TestCase):
     def test_real_entire_actuation_and_feedback_chain(self):
         self.hardware['gripper']['block'] = 0  # user's legacy config
         root = self.model('real')
+        self.assertEqual(self.hardware['gripper']['force_n'], 10.0)
+        self.assertEqual(self.hardware['gripper']['force'], 50)
         mapping = moveit_config(root, self.arms, 'real')['moveit_simple_controller_manager']
         self.assertEqual(len(mapping['controller_names']), 4)
         for side in ('left', 'right'):
@@ -53,7 +55,7 @@ class ContractTests(unittest.TestCase):
                 self.assertIn(name, c[f'{side}_controller_manager']['ros__parameters'])
                 self.assertLessEqual(set(mapping[name]['joints']), interface_names)
             self.assertEqual(mapping[f'{side}_gripper_controller']['action_ns'], 'gripper_cmd')
-            self.assertFalse(c[f'{side}_gripper_controller']['ros__parameters']['allow_stalling'])
+            self.assertTrue(c[f'{side}_gripper_controller']['ros__parameters']['allow_stalling'])
 
     def test_mimic_not_an_independent_command_in_any_mode(self):
         for mode in ('mock', 'gazebo', 'real'):

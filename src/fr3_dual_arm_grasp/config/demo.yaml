@@ -1,12 +1,17 @@
 # Commission locally; never use guessed robot positions for real execution.
 scene_and_object_verified: false
 display_dwell_seconds: 2.0
+handover_centerline_tolerance_m: 0.005
+handover_centerline_angle_deg: 5.0
 workpiece:
   # Example conservative box around the part, expressed in its object frame.
   dimensions_m: [0.045, 0.018, 0.018]
   # T_right_tcp_object at the taught right_grasp point: xyz[m], quaternion xyzw.
   # Measure for your part and grasp. This is NOT a robot controller tool offset.
   right_tcp_to_object: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+  # Successful adaptive grasp must stop within this measured total opening.
+  grasp_gap_min_m: 0.010
+  grasp_gap_max_m: 0.026
 
 # Keep dimensions and TCP offset for grasp bookkeeping, but hide the part
 # from RViz and the MoveIt collision scene for this demo.

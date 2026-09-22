@@ -21,7 +21,8 @@ import yaml
 from ament_index_python.packages import get_package_share_directory
 
 from .teach_model import (Feedback, TeachBook, captured_point, model_fingerprint,
-                          finite_vector, pose_vector, SIDES)
+                          finite_vector, pose_vector, validate_handover_centerline,
+                          SIDES)
 from .motion import DualArmMoveIt, pose_values
 from .demo_scene import DemoScene
 from .workflow import run_workflow
@@ -56,10 +57,10 @@ class DemoApp(Node):
             self.robot_ips = {side: hardware[side]['robot_ip'] for side in SIDES}
         self.open_gap = float(arms['gripper']['open_gap'])
         self.feedback = Feedback(max_age=1.0)
-        self.stop_event, self.confirm_event = threading.Event(), threading.Event()
+        self.stop_event = threading.Event()
         self.operation_lock = threading.Lock()
         self.worker = None
-        self.status_text, self.awaiting_confirmation = '就绪：等待机器人反馈', ''
+        self.status_text = '就绪：等待机器人反馈'
         self.recovery_required = False
         self.motion = DualArmMoveIt(self, self.feedback, self.stop_event, param('enable_execution'), param('speed'))
         self.switch_clients = {side: self.create_client(SwitchController,
@@ -74,6 +75,18 @@ class DemoApp(Node):
         if any(x <= 0 or x > 1 for x in dimensions):
             raise ValueError('Workpiece box dimensions must be in (0, 1] m')
         offset = pose_vector(config['workpiece']['right_tcp_to_object'])
+        self.grasp_gap_min = float(config['workpiece'].get('grasp_gap_min_m', 0.005))
+        self.grasp_gap_max = float(config['workpiece'].get('grasp_gap_max_m', 0.04))
+        if not 0 < self.grasp_gap_min < self.grasp_gap_max < self.open_gap:
+            raise ValueError('Workpiece grasp gap range must be inside the calibrated gripper opening')
+        self.handover_line_tolerance = float(
+            config.get('handover_centerline_tolerance_m', 0.005))
+        self.handover_angle_tolerance = math.radians(float(
+            config.get('handover_centerline_angle_deg', 5.0)))
+        if not 0.001 <= self.handover_line_tolerance <= 0.02:
+            raise ValueError('Handover centerline tolerance must be 1..20 mm')
+        if not math.radians(1) <= self.handover_angle_tolerance <= math.radians(15):
+            raise ValueError('Handover centerline angle tolerance must be 1..15 deg')
         self.scene = DemoScene(
             self, self.motion, scene, dimensions, offset,
             show_workpiece=config.get('show_workpiece_in_rviz', False))
@@ -105,7 +118,7 @@ class DemoApp(Node):
         # Incoming messages are candidates only; they cannot start a motion.
         self.create_subscription(PoseStamped, '/grasp/perception/grasp_tcp', self.on_candidate, 10)
         for name, callback in [('start', self.start_service), ('stop', self.stop_service),
-                               ('status', self.status_service), ('continue', self.continue_service)]:
+                               ('status', self.status_service)]:
             self.create_service(Trigger, '/grasp/' + name, callback)
         self.create_timer(0.5, lambda: self.status_pub.publish(String(data=self.status_json())))
 
@@ -216,7 +229,6 @@ class DemoApp(Node):
     def status_json(self):
         return json.dumps(dict(message=self.status_text, busy=self.busy,
                                execution_enabled=self.motion.enabled,
-                               awaiting_confirmation=self.awaiting_confirmation,
                                owner=self.scene.owner, recovery_required=self.recovery_required,
                                motion_fault=self.motion.fault,
                                keypoint_motion_mode=self.keypoint_motion_mode), ensure_ascii=False)
@@ -343,15 +355,84 @@ class DemoApp(Node):
         self.initialize_scene()
         self.motion.gripper(side, gap, execute)
 
+    def verify_grasp(self, side, timeout=3.0):
+        """Accept a grasp only when the measured opening is stable and plausible."""
+        joint = side + '_left_finger_joint'
+        deadline = time.monotonic() + timeout
+        stable = []
+        last_gap = None
+        while time.monotonic() < deadline:
+            gap = 2.0 * float(self.motion.guard(True)[joint])
+            if self.grasp_gap_min <= gap <= self.grasp_gap_max:
+                if last_gap is not None and abs(gap - last_gap) <= 0.0005:
+                    stable.append(gap)
+                else:
+                    stable = [gap]
+                if len(stable) >= 5:
+                    self.publish(
+                        f'{side} 自动夹持成功：实际开度 {gap*1000:.1f} mm')
+                    return gap
+            else:
+                stable = []
+            last_gap = gap
+            time.sleep(0.05)
+        measured = 2.0 * float(self.motion.guard(True)[joint])
+        raise RuntimeError(
+            f'{side} 自动夹持失败：实际开度 {measured*1000:.1f} mm，'
+            f'允许范围 {self.grasp_gap_min*1000:.1f}–{self.grasp_gap_max*1000:.1f} mm')
+
+    def verify_handover_alignment(self):
+        poses = self.motion.tcp_poses()
+        lateral, angle = validate_handover_centerline(
+            poses['left'], poses['right'],
+            self.handover_line_tolerance, self.handover_angle_tolerance)
+        self.publish(
+            f'交接中心线已对准：横向偏差 {lateral*1000:.1f} mm，'
+            f'角度偏差 {math.degrees(angle):.1f}°')
+
+    def aligned_handover_target(self):
+        """Project the taught receiver TCP onto the donor's live centerline."""
+        taught = self.book.points['left_receive']
+        taught_left = matrix(taught['left']['tcp'])
+        taught_right = matrix(taught['right']['tcp'])
+        live_right = matrix(self.motion.tcp_poses()['right'])
+
+        # Preserve the taught axial spacing, but remove all lateral offset.
+        taught_axis = taught_right[:3, 2]
+        axial_spacing = float(np.dot(
+            taught_left[:3, 3] - taught_right[:3, 3], taught_axis))
+        donor_axis = live_right[:3, 2]
+        target = np.eye(4)
+        target[:3, 3] = live_right[:3, 3] + axial_spacing * donor_axis
+
+        # Receiver Z faces donor Z. Preserve its taught roll as closely as
+        # possible by projecting the taught X axis onto the new normal plane.
+        receiver_z = -donor_axis
+        receiver_x = taught_left[:3, 0] - np.dot(
+            taught_left[:3, 0], receiver_z) * receiver_z
+        norm = float(np.linalg.norm(receiver_x))
+        if norm < 1e-6:
+            receiver_x = live_right[:3, 0]
+            receiver_x -= np.dot(receiver_x, receiver_z) * receiver_z
+            norm = float(np.linalg.norm(receiver_x))
+        receiver_x /= norm
+        receiver_y = np.cross(receiver_z, receiver_x)
+        receiver_y /= np.linalg.norm(receiver_y)
+        receiver_x = np.cross(receiver_y, receiver_z)
+        target[:3, :3] = np.column_stack((receiver_x, receiver_y, receiver_z))
+        return vector(target)
+
+    def move_handover_receive(self):
+        target = self.aligned_handover_target()
+        self.publish('自动对齐左手接取位姿到右手夹爪中心线')
+        # The corrected TCP still goes through MoveIt IK, OMPL and collision
+        # checking. The donor remains stationary throughout this move.
+        self.motion.pose('left', target, execute=True)
+
     def start_demo(self):
         if not self.commissioned:
             raise RuntimeError('请核对工作台 / 零件尺寸和 TCP 偏移，并在 demo.yaml 设置 scene_and_object_verified: true')
         run_workflow(self)
-
-    def continue_demo(self):
-        if not self.awaiting_confirmation:
-            raise RuntimeError('当前没有等待确认的步骤')
-        self.confirm_event.set()
 
     def recover(self):
         self.scene.clear_after_manual_recovery()
@@ -368,14 +449,6 @@ class DemoApp(Node):
     def stop_service(self, request, response):
         self.motion.cancel()
         response.success, response.message = True, 'Cancel requested; wait for terminal status; grippers retained'
-        return response
-
-    def continue_service(self, request, response):
-        try:
-            self.continue_demo()
-            response.success, response.message = True, 'Operator confirmed'
-        except Exception as exc:
-            response.success, response.message = False, str(exc)
         return response
 
     def status_service(self, request, response):
