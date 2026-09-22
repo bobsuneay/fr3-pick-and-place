@@ -114,7 +114,7 @@ ros2 launch fr3_dual_arm_grasp grasp.launch.py enable_execution:=false
 
 默认自动保存到当前工程源码目录的 `src/fr3_dual_arm_grasp/config/teach_points.json`，不使用 `~/.ros`。默认的 arms、scene 和 demo 配置也优先从本工作空间 `src/` 读取；安装时不带源码的部署才回退到对应包的 `install/.../share/.../config/`。示教文件包含 arms/scene 配置内容哈希，不允许跨不同安装标定或相机场景直接回放。旧 SDK JSON 的 mm/degree 与新 schema 不兼容，需重新采集。载入失败时不会悄悄覆盖旧文件；选择“另存为”以创建新文件。
 
-## 6. 工作台和零件包围盒
+## 6. 工作台和零件模型
 
 `scene.yaml` 保留原基础工程的桌面示例；**双臂和支架已标定不代表桌面和零件也已核对。** 默认桌面中心 `[0.48, 0] m`、尺寸 `0.7 × 2.0 m`、台面高 `0.75 m`。按现场更新副本并通过 `scene:=...` 传入。
 
@@ -124,7 +124,16 @@ ros2 launch fr3_dual_arm_grasp grasp.launch.py enable_execution:=false
 nano src/fr3_dual_arm_grasp/config/demo.yaml
 ```
 
-填写实际 `workpiece.dimensions_m` 与抓取时的 `right_tcp_to_object`（TCP 到零件包围盒中心的变换），核对后设置 `scene_and_object_verified: true`。默认值仅为示例，完整 demo 默认拒绝运行。再启动：
+当前 demo 的零件是竖直圆柱，高 35 mm、直径 16 mm：
+
+```yaml
+workpiece:
+  shape: cylinder
+  radius_m: 0.008
+  height_m: 0.035
+```
+
+如现场零件姿态或尺寸不同，修改 `shape`、`radius_m`、`height_m` 以及 `right_tcp_to_object`（TCP 到零件中心的变换），核对后设置 `scene_and_object_verified: true`。默认值仅为示例，完整 demo 默认拒绝运行。再启动：
 
 ```bash
 ros2 launch fr3_dual_arm_bringup pick_place.launch.py \

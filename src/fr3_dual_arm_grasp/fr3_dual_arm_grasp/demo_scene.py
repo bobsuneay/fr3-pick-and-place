@@ -25,12 +25,16 @@ def finger_links(side):
     return [side + '_left_finger', side + '_right_finger']
 
 
-def box_object(name, dimensions, pose, frame='world'):
+def box_object(name, dimensions, pose, frame='world', shape='box'):
     obj = CollisionObject()
     obj.id, obj.header.frame_id, obj.operation = name, frame, CollisionObject.ADD
-    shape = SolidPrimitive()
-    shape.type, shape.dimensions = SolidPrimitive.BOX, list(map(float, dimensions))
-    obj.primitives, obj.primitive_poses = [shape], [pose_msg(pose)]
+    primitive = SolidPrimitive()
+    if shape == 'cylinder':
+        primitive.type = SolidPrimitive.CYLINDER
+        primitive.dimensions = [float(dimensions[1]), float(dimensions[0])]
+    else:
+        primitive.type, primitive.dimensions = SolidPrimitive.BOX, list(map(float, dimensions))
+    obj.primitives, obj.primitive_poses = [primitive], [pose_msg(pose)]
     return obj
 
 
@@ -38,9 +42,10 @@ class DemoScene:
     OBJECT = 'fr3_demo_workpiece'
 
     def __init__(self, node, motion, scene, dimensions, tcp_offset,
-                 show_workpiece=False):
+                 show_workpiece=False, shape='box'):
         self.motion, self.scene = motion, scene
         self.dimensions, self.offset = dimensions, tcp_offset
+        self.shape = shape
         self.show_workpiece = bool(show_workpiece)
         self.owner, self.local_pose, self.world_pose = None, None, None
         self.touch_sides = []
@@ -103,7 +108,7 @@ class DemoScene:
         if self.show_workpiece:
             self.allow(['right'], table=True)
             req = self.diff()
-            req.scene.world.collision_objects = [box_object(self.OBJECT, self.dimensions, self.world_pose)]
+            req.scene.world.collision_objects = [box_object(self.OBJECT, self.dimensions, self.world_pose, shape=self.shape)]
             self.commit(req)
 
     def current_world(self):
@@ -115,7 +120,8 @@ class DemoScene:
     def attached(self, side, local, touch_sides):
         attached = AttachedCollisionObject()
         attached.link_name = side + '_gripper_tcp'
-        attached.object = box_object(self.OBJECT, self.dimensions, local, attached.link_name)
+        attached.object = box_object(
+            self.OBJECT, self.dimensions, local, attached.link_name, self.shape)
         attached.touch_links = [link for s in touch_sides for link in finger_links(s)]
         return attached
 
@@ -154,7 +160,7 @@ class DemoScene:
             old = AttachedCollisionObject()
             old.link_name, old.object.id, old.object.operation = self.owner + '_gripper_tcp', self.OBJECT, CollisionObject.REMOVE
             req.scene.robot_state.attached_collision_objects = [old]
-            req.scene.world.collision_objects = [box_object(self.OBJECT, self.dimensions, world)]
+            req.scene.world.collision_objects = [box_object(self.OBJECT, self.dimensions, world, shape=self.shape)]
             self.commit(req)
         self.owner, self.local_pose, self.world_pose = None, None, world
 

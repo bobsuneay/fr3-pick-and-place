@@ -72,7 +72,16 @@ class DemoApp(Node):
         self.live_poses, self.live_pose_error = {}, '等待实时 TCP'
         self.live_stamp, self.live_pending = 0.0, None
         self.create_timer(0.2, self.update_live_pose)
-        dimensions = finite_vector(config['workpiece']['dimensions_m'], 3, 'workpiece dimensions')
+        workpiece = config['workpiece']
+        shape = workpiece.get('shape', 'box')
+        if shape == 'cylinder':
+            radius = float(workpiece['radius_m'])
+            height = float(workpiece['height_m'])
+            if not 0 < radius <= 0.5 or not 0 < height <= 1.0:
+                raise ValueError('Cylinder workpiece radius/height outside range')
+            dimensions = [height, 2.0 * radius, 2.0 * radius]
+        else:
+            dimensions = finite_vector(workpiece['dimensions_m'], 3, 'workpiece dimensions')
         if any(x <= 0 or x > 1 for x in dimensions):
             raise ValueError('Workpiece box dimensions must be in (0, 1] m')
         offset = pose_vector(config['workpiece']['right_tcp_to_object'])
@@ -90,7 +99,7 @@ class DemoApp(Node):
             raise ValueError('Handover centerline angle tolerance must be 1..15 deg')
         self.scene = DemoScene(
             self, self.motion, scene, dimensions, offset,
-            show_workpiece=config.get('show_workpiece_in_rviz', False))
+            show_workpiece=config.get('show_workpiece_in_rviz', False), shape=shape)
         self.dwell = float(config.get('display_dwell_seconds', 2.0))
         if not 0 <= self.dwell <= 60:
             raise ValueError('Display dwell must be 0..60 seconds')
