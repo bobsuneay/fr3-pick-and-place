@@ -196,7 +196,7 @@ class DualArmMoveIt:
                 raise ValueError('Non-finite joint target')
             jc = JointConstraint()
             jc.joint_name, jc.position, jc.weight = name, float(position), 1.0
-            jc.tolerance_above = jc.tolerance_below = 0.0002 if 'finger' in name else 0.002
+            jc.tolerance_above = jc.tolerance_below = 0.0005 if 'finger' in name else 0.01
             constraint.joint_constraints.append(jc)
         result = self._goal(group, constraint, execute)
         if execute and verify:
@@ -275,32 +275,12 @@ class DualArmMoveIt:
         """Plan one or both saved TCP targets through MoveIt's IK and OMPL."""
         if not targets or any(side not in ('left', 'right') for side in targets):
             raise ValueError('TCP targets must contain left and/or right')
-        constraints = Constraints()
-        positions, orientations = [], []
+        joint_targets = {}
         for side, values in targets.items():
-            target = pose_msg(values)
-            pc = PositionConstraint()
-            pc.header.frame_id, pc.link_name, pc.weight = 'world', side + '_gripper_tcp', 1.0
-            region = SolidPrimitive()
-            region.type, region.dimensions = SolidPrimitive.SPHERE, [0.001]
-            pc.constraint_region.primitives = [region]
-            pc.constraint_region.primitive_poses = [target]
-            oc = OrientationConstraint()
-            oc.header.frame_id, oc.link_name, oc.weight = 'world', side + '_gripper_tcp', 1.0
-            oc.orientation = target.orientation
-            oc.absolute_x_axis_tolerance = oc.absolute_y_axis_tolerance = oc.absolute_z_axis_tolerance = 0.01
-            positions.append(pc)
-            orientations.append(oc)
-        constraints.position_constraints = positions
-        constraints.orientation_constraints = orientations
-        return self._goal(group, constraints, execute)
+            joint_targets.update(self._ik_joints(side, values))
+        return self.joints(joint_targets, group, execute)
 
-    def pose(self, side, values, execute=False, linear=False):
-        if linear:
-            return self.linear(side, values, execute)
-        # Resolve the TCP target with MoveIt's dedicated IK service first.
-        # The resulting joint target is then planned through OMPL, so collision
-        # checking remains active and IK failures are reported separately.
+    def _ik_joints(self, side, values):
         request = GetPositionIK.Request()
         request.ik_request.group_name = side + '_arm'
         request.ik_request.ik_link_name = side + '_gripper_tcp'
@@ -312,8 +292,13 @@ class DualArmMoveIt:
         if result.error_code.val != 1:
             raise RuntimeError(f'IK failed for {side} TCP target: code={result.error_code.val}')
         joints = dict(zip(result.solution.joint_state.name, result.solution.joint_state.position))
-        targets = {f'{side}_j{i}': joints[f'{side}_j{i}'] for i in range(1, 7)}
-        return self.joints(targets, side + '_arm', execute)
+        return {f'{side}_j{i}': joints[f'{side}_j{i}'] for i in range(1, 7)}
+
+    def pose(self, side, values, execute=False, linear=False):
+        # Resolve the TCP target with MoveIt's dedicated IK service first.
+        # The resulting joint target is then planned through OMPL, so collision
+        # checking remains active and IK failures are reported separately.
+        return self.joints(self._ik_joints(side, values), side + '_arm', execute)
 
     def show(self, state, trajectory):
         msg = DisplayTrajectory()
