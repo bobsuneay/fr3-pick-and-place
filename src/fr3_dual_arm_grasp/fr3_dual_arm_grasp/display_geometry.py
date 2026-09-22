@@ -33,19 +33,8 @@ def camera_neutral(camera, taught_tcp, tcp_object, distance=0.30):
     optical = (Rotation.from_euler('xyz', camera['rpy']) *
                Rotation.from_euler('xyz', [-math.pi/2, 0, -math.pi/2]))
     obj = matrix(taught_tcp) @ tcp_object
-    # Make the gripper Z axis perpendicular to the camera optical axis.
-    optical_axis = optical.apply([0, 0, 1])
-    z_axis = obj[:3, 2] - np.dot(obj[:3, 2], optical_axis) * optical_axis
-    if np.linalg.norm(z_axis) < 1e-8:
-        z_axis = optical.apply([1, 0, 0])
-    z_axis /= np.linalg.norm(z_axis)
-    x_axis = obj[:3, 0] - np.dot(obj[:3, 0], z_axis) * z_axis
-    if np.linalg.norm(x_axis) < 1e-8:
-        x_axis = np.cross(optical_axis, z_axis)
-    x_axis /= np.linalg.norm(x_axis)
-    y_axis = np.cross(z_axis, x_axis)
-    y_axis /= np.linalg.norm(y_axis)
-    obj[:3, :3] = np.column_stack((x_axis, y_axis, z_axis))
+    # Display pose: rotate the gripper about its local X axis by +45 degrees.
+    obj[:3, :3] = obj[:3, :3] @ Rotation.from_euler('x', 45, degrees=True).as_matrix()
     obj[:3, 3] = np.asarray(camera['xyz']) + optical.apply([0, 0, distance])
     return obj
 
