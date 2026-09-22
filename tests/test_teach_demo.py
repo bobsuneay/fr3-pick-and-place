@@ -28,8 +28,6 @@ def book():
     result = TeachBook('model-test', 0.1)
     for name in SLOTS:
         result.record(name, point())
-    # Receiver faces the donor on the same TCP Z centerline.
-    result.points['left_receive']['left']['tcp'][3:] = [1.0, 0.0, 0.0, 0.0]
     result.points['right_pregrasp']['right']['gap_m'] = 0.1
     result.points['ready']['left']['gap_m'] = 0.1
     return result
@@ -100,9 +98,6 @@ def test_invalid_point_rejected(mutate):
 def test_missing_points_and_inconsistent_handover():
     b = book()
     b.validate_complete()
-    b.points['left_receive']['right']['joints'][0] += 0.1
-    with pytest.raises(ValueError, match='Right arm changed'):
-        b.validate_complete()
     del b.points['ready']
     with pytest.raises(ValueError, match='missing'):
         b.validate_complete()
@@ -164,6 +159,9 @@ class FakeApp:
 
     def initialize_scene(self):
         pass
+
+    def grasp_target(self):
+        return self.book.points['right_pregrasp']['right']['tcp']
 
     def scan_display(self, side):
         self.event('scan', side)
@@ -249,5 +247,5 @@ def test_old_points_load_without_requiring_obsolete_views(tmp_path):
     target = TeachBook('model-test', 0.1)
     target.load(path)
     target.validate_complete()
-    assert len(target.points) == 7
+    assert len(target.points) == 3
     assert 'right_view_1' in json.loads(path.read_text())['points']

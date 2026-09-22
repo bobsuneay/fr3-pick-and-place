@@ -49,6 +49,7 @@ class DemoApp(Node):
         arms = yaml.safe_load(Path(self.arms_file).read_text(encoding='utf-8'))
         scene = yaml.safe_load(Path(self.scene_file).read_text(encoding='utf-8'))
         config = yaml.safe_load(Path(param('demo_config')).read_text(encoding='utf-8'))
+        self.demo_config = config
         self.mode = param('mode')
         self.robot_ips = {}
         if self.mode == 'real':
@@ -273,12 +274,60 @@ class DemoApp(Node):
             self.book.save(self.points_file)
         return point
 
+    def _generated_point(self, tcp, gap=0.0):
+        ready = self.book.points['ready']
+        return dict(frame='world', captured_at='generated',
+                    left=dict(joints=ready['left']['joints'], tcp=tcp,
+                              tcp_link='left_gripper_tcp', gap_m=gap),
+                    right=dict(joints=ready['right']['joints'], tcp=tcp,
+                               tcp_link='right_gripper_tcp', gap_m=gap))
+
+    def generated_targets(self, name):
+        pre = self.book.points['right_pregrasp']['right']['tcp']
+        if name == 'right_grasp':
+            target = matrix(pre)
+            target[0, 3], target[1, 3] = pre[0], pre[1]
+            target[2, 3] = float(self.scene.scene['table']['top_z']) + 0.010
+            # Keep the taught yaw/roll, but force TCP Z vertically downward.
+            z_axis = np.array([0.0, 0.0, -1.0])
+            x_axis = target[:3, 0] - np.dot(target[:3, 0], z_axis) * z_axis
+            x_axis /= np.linalg.norm(x_axis)
+            y_axis = np.cross(z_axis, x_axis)
+            target[:3, :3] = np.column_stack((x_axis, y_axis, z_axis))
+            return self._generated_point(vector(target), 0.0)
+        if name == 'handover_ready':
+            center = np.asarray(self.demo_config.get('handover_center_xyz', [0.35, 0.0, 1.0]), dtype=float)
+            separation = float(self.demo_config.get('handover_separation_m', 0.16))
+            axis = np.array([1.0, 0.0, 0.0])
+            z_right, z_left = axis, -axis
+            y = np.array([0.0, 0.0, 1.0])
+            right_r = np.column_stack((np.cross(y, z_right), y, z_right))
+            left_r = np.column_stack((np.cross(y, z_left), y, z_left))
+            right = np.eye(4); left = np.eye(4)
+            right[:3, :3], left[:3, :3] = right_r, left_r
+            right[:3, 3] = center + axis * separation / 2.0
+            left[:3, 3] = center - axis * separation / 2.0
+            return {
+                'right': dict(tcp=vector(right), joints=self.book.points['ready']['right']['joints'], gap_m=0.0),
+                'left': dict(tcp=vector(left), joints=self.book.points['ready']['left']['joints'], gap_m=0.0),
+            }
+        raise ValueError('Unknown generated target: ' + name)
+
+    def grasp_target(self):
+        return self.generated_targets('right_grasp')['right']['tcp']
+
     def move_point(self, name, side, execute=False, linear=False):
         self.initialize_scene()
         if name == 'right_display':
             if side == 'both':
                 raise ValueError('展示中心由单臂占用，请选择左手或右手')
             return self.move_display_neutral(side, execute)
+        if name in ('right_grasp', 'handover_ready'):
+            generated = self.generated_targets(name)
+            if name == 'right_grasp':
+                return self.motion.pose('right', generated['right']['tcp'], execute, linear=linear)
+            return self.motion.poses(
+                {s: generated[s]['tcp'] for s in SIDES}, 'both_arms', execute)
         point = deepcopy(self.book.points[name])
         self.book.validate_point(point)
         sides = SIDES if side == 'both' else (side,)
@@ -305,7 +354,7 @@ class DemoApp(Node):
     def display_neutral(self):
         # The stored measured joints/TCP remain unchanged; derive targets at use time.
         return camera_neutral(self.scene.scene['camera'],
-            self.book.points['right_display']['right']['tcp'], matrix(self.scene.offset))
+            self.book.points['right_pregrasp']['right']['tcp'], matrix(self.scene.offset))
 
     def move_display_neutral(self, side, execute=False):
         target = vector(self.display_neutral() @ np.linalg.inv(self.tcp_object(side)))
@@ -392,9 +441,9 @@ class DemoApp(Node):
 
     def aligned_handover_target(self):
         """Project the taught receiver TCP onto the donor's live centerline."""
-        taught = self.book.points['left_receive']
-        taught_left = matrix(taught['left']['tcp'])
-        taught_right = matrix(taught['right']['tcp'])
+        generated = self.generated_targets('handover_ready')
+        taught_left = matrix(generated['left']['tcp'])
+        taught_right = matrix(generated['right']['tcp'])
         live_right = matrix(self.motion.tcp_poses()['right'])
 
         # Preserve the taught axial spacing, but remove all lateral offset.

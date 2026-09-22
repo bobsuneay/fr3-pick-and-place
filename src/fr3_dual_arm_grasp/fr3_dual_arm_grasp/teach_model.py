@@ -14,14 +14,11 @@ MEASURED = JOINTS + tuple(f'{s}_left_finger_joint' for s in SIDES)
 SLOTS = {
     'ready': '双臂就绪（双夹爪张开）',
     'right_pregrasp': '右手抓取接近点（张开，复用于抬升）',
-    'right_grasp': '右手抓取点（夹持开度）',
-    'right_display': '展示参考（右手姿态；双臂共用，相机前 30 cm）',
-    'handover_ready': '双臂交接预备（左手保持接近距离）',
-    'left_receive': '左手接取点（夹持开度，右手不动）',
     'left_place': '左手放置点（保持夹持）',
 }
 LEGACY_SLOTS = {'right_lift', 'right_view_1', 'right_view_2', 'right_retreat',
-                'left_display', 'left_view_1', 'left_view_2', 'left_preplace', 'left_retreat'}
+                'left_display', 'left_view_1', 'left_view_2', 'left_preplace', 'left_retreat',
+                'right_display', 'right_grasp', 'handover_ready', 'left_receive'}
 
 
 def tcp_z_axis(pose):
@@ -142,15 +139,8 @@ class TeachBook:
             raise ValueError('Teach missing points: ' + ', '.join(sorted(missing)))
         for point in self.points.values():
             self.validate_point(point)
-        # The donor must stay fixed while the receiver approaches.
-        donor = self.points['handover_ready']['right']['joints']
-        receive_donor = self.points['left_receive']['right']['joints']
-        if max(abs(a-b) for a, b in zip(donor, receive_donor)) > 0.02:
-            raise ValueError('Right arm changed between handover_ready and left_receive; reteach')
-        for side, closed, opened in [('right', 'right_grasp', 'right_pregrasp'),
-                                     ('left', 'left_receive', 'ready')]:
-            if self.points[opened][side]['gap_m'] <= self.points[closed][side]['gap_m'] + 0.002:
-                raise ValueError(f'{side}: teach an open gap at least 2 mm wider than the grasp gap')
+        # Grasp, display and handover points are generated from these three
+        # measured points at runtime; they are intentionally not required here.
 
     def save(self, path):
         path = Path(path).expanduser()

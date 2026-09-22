@@ -3,6 +3,8 @@ scene_and_object_verified: false
 display_dwell_seconds: 2.0
 handover_centerline_tolerance_m: 0.005
 handover_centerline_angle_deg: 5.0
+handover_center_xyz: [0.35, 0.0, 1.00]
+handover_separation_m: 0.16
 workpiece:
   # Example conservative box around the part, expressed in its object frame.
   dimensions_m: [0.045, 0.018, 0.018]

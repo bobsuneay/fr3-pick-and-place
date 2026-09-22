@@ -9,7 +9,7 @@ def run_workflow(app):
     app.motion.guard(True)
     if app.scene.owner or app.recovery_required:
         raise RuntimeError('Recover previous run before starting a new demo')
-    app.scene.place_initial(app.book.points['right_grasp']['right']['tcp'])
+    app.scene.place_initial(app.grasp_target())
     # Once a run begins, failure must never automatically restart at the first step.
     app.recovery_required = True
     for index, (kind, side, key) in enumerate(recipe(), 1):
@@ -29,6 +29,8 @@ def run_workflow(app):
             app.scan_display(side)
         elif kind == 'receive':
             app.move_handover_receive()
+        elif kind == 'approach':
+            app.move_grasp_target()
         elif kind == 'retreat':
             app.retreat_donor()
         elif kind in ('preplace', 'place'):
