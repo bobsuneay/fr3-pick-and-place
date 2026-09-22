@@ -26,7 +26,7 @@ from .teach_model import (Feedback, TeachBook, captured_point, model_fingerprint
 from .motion import DualArmMoveIt, pose_values
 from .demo_scene import DemoScene
 from .workflow import run_workflow
-from .display_geometry import VIEWS, matrix, vector, camera_neutral, object_path
+from .display_geometry import matrix, vector, camera_neutral, object_path, display_views
 from .teaching import TeachingMode, robot_mode
 
 
@@ -103,6 +103,9 @@ class DemoApp(Node):
         self.dwell = float(config.get('display_dwell_seconds', 2.0))
         if not 0 <= self.dwell <= 60:
             raise ValueError('Display dwell must be 0..60 seconds')
+        self.display_distance = float(config.get('display_distance_m', 0.40))
+        if not 0.1 <= self.display_distance <= 1.0:
+            raise ValueError('Display distance must be 0.1..1.0 m')
         self.retreat_distance = float(config.get('retreat_distance_m', 0.06))
         self.place_clearance = float(config.get('place_clearance_m', 0.08))
         if not all(math.isfinite(x) and 0.01 <= x <= 0.3 for x in (self.retreat_distance, self.place_clearance)):
@@ -363,7 +366,8 @@ class DemoApp(Node):
     def display_neutral(self):
         # The stored measured joints/TCP remain unchanged; derive targets at use time.
         return camera_neutral(self.scene.scene['camera'],
-            self.book.points['right_pregrasp']['right']['tcp'], matrix(self.scene.offset))
+            self.book.points['right_pregrasp']['right']['tcp'], matrix(self.scene.offset),
+            distance=self.display_distance)
 
     def move_display_neutral(self, side, execute=False):
         target = vector(self.display_neutral() @ np.linalg.inv(self.tcp_object(side)))
@@ -371,18 +375,37 @@ class DemoApp(Node):
 
     def scan_display(self, side):
         neutral, offset = self.display_neutral(), self.tcp_object(side)
-        self.move_display_neutral(side, True)
-        for index, angles in enumerate(VIEWS, 1):
+        test_only = bool(self.demo_config.get('display_z_test_only', False))
+        if test_only:
+            views = ([[0, 0, 0]] +
+                     [[0, 0, angle] for angle in range(15, 181, 15)] +
+                     [[0, 0, angle] for angle in range(165, -181, -15)])
+            execute = False
+        else:
+            self.move_display_neutral(side, True)
+            z_sign = int(self.demo_config.get('display_z_direction', 1))
+            views = display_views(side, z_sign)
+            execute = True
+        for index, angles in enumerate(views, 1):
             self.motion.guard(True)
-            self.publish(f'{side} 展示 {index}/{len(VIEWS)}，零件 RPY {angles}°')
-            target = neutral.copy()
-            target[:3, :3] = neutral[:3, :3] @ Rotation.from_euler('xyz', angles, degrees=True).as_matrix()
+            self.publish(f'{side} 展示 {index}/{len(views)}，零件 RPY {angles}°')
+            # X=-90 relative to neutral gives the absolute Rx=-180 pose.
+            if angles[2]:
+                target = neutral.copy()
+                target[:3, :3] = neutral[:3, :3] @ Rotation.from_euler('z', angles[2], degrees=True).as_matrix()
+            else:
+                target = neutral.copy()
+                target[:3, :3] = neutral[:3, :3] @ Rotation.from_euler('x', angles[0], degrees=True).as_matrix()
             if any(angles):
-                self.motion.cartesian(side, object_path(neutral, target, offset), True)
-            if self.stop_event.wait(self.dwell):
+                self.motion.pose(side, vector(target @ np.linalg.inv(offset)), execute)
+            if execute and self.stop_event.wait(self.dwell):
                 raise RuntimeError('展示已停止')
             if any(angles):
-                self.motion.cartesian(side, object_path(target, neutral, offset), True)
+                # The X presentation intentionally ends at Rx=-180°; do not
+                # use Cartesian interpolation near this wrist turn.
+                if angles[0] == -90:
+                    self.motion.pose(side, vector(neutral @ np.linalg.inv(offset)), execute)
+                    continue
 
     def retreat_donor(self):
         tcp = matrix(self.motion.tcp_poses()['right'])
@@ -415,6 +438,12 @@ class DemoApp(Node):
 
     def verify_grasp(self, side, timeout=3.0):
         """Accept a grasp only when the measured opening is stable and plausible."""
+        # Mock mode has no physical workpiece.  The simulated gripper therefore
+        # reaches the closed endpoint without producing a meaningful object
+        # width, so do not abort the demo on the real-hardware grasp check.
+        if self.mode == 'mock':
+            self.publish(f'{side} mock 夹取：跳过实际开度判定，继续 demo')
+            return 0.0
         joint = side + '_left_finger_joint'
         deadline = time.monotonic() + timeout
         stable = []
@@ -490,6 +519,11 @@ class DemoApp(Node):
     def start_demo(self):
         if not self.commissioned:
             raise RuntimeError('请核对工作台 / 零件尺寸和 TCP 偏移，并在 demo.yaml 设置 scene_and_object_verified: true')
+        if self.demo_config.get('display_z_test_only', False):
+            self.initialize_scene()
+            self.scan_display('right')
+            self.publish('Z 轴整圈展示规划测试完成：未执行机器人运动')
+            return
         run_workflow(self)
 
     def recover(self):
@@ -532,3 +566,4 @@ def main():
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
+

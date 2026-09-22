@@ -3,11 +3,18 @@ import math
 import numpy as np
 from scipy.spatial.transform import Rotation, Slerp
 
-VIEWS = [[0, 0, 0], [0, 0, -30], [0, 15, 0], [0, -15, 0],
-         [0, 35, 0], [0, -35, 0], [15, 0, 0], [-15, 0, 0],
-         [60, 0, 0], [-60, 0, 0], [120, 0, 0], [-120, 0, 0],
-         [180, 0, 0], [0, 0, 60], [0, 0, -60], [0, 0, 120],
-         [0, 0, -120], [0, 0, 180]]
+# Inspection angles are generated per arm because the two arms have mirrored
+# joint limits.  Z rotates in one direction only; X reverses for the left arm.
+_DISPLAY_ANGLES = (15, 60, 120, 180)
+VIEWS = [[0, 0, 0]] + [[angle, 0, 0] for angle in _DISPLAY_ANGLES] + [[0, 0, angle] for angle in _DISPLAY_ANGLES]
+
+
+def display_views(side, z_sign=1):
+    """Return IK-friendly one-way X/Z inspection poses for one arm."""
+    x_sign = 1 if side == 'right' else -1
+    z_sign = 1 if z_sign >= 0 else -1
+    return ([[0, 0, 0], [-90, 0, 0]] +
+            [[0, 0, z_sign * angle] for angle in range(15, 361, 15)])
 
 
 def matrix(pose):
@@ -26,6 +33,19 @@ def camera_neutral(camera, taught_tcp, tcp_object, distance=0.30):
     optical = (Rotation.from_euler('xyz', camera['rpy']) *
                Rotation.from_euler('xyz', [-math.pi/2, 0, -math.pi/2]))
     obj = matrix(taught_tcp) @ tcp_object
+    # Make the gripper Z axis perpendicular to the camera optical axis.
+    optical_axis = optical.apply([0, 0, 1])
+    z_axis = obj[:3, 2] - np.dot(obj[:3, 2], optical_axis) * optical_axis
+    if np.linalg.norm(z_axis) < 1e-8:
+        z_axis = optical.apply([1, 0, 0])
+    z_axis /= np.linalg.norm(z_axis)
+    x_axis = obj[:3, 0] - np.dot(obj[:3, 0], z_axis) * z_axis
+    if np.linalg.norm(x_axis) < 1e-8:
+        x_axis = np.cross(optical_axis, z_axis)
+    x_axis /= np.linalg.norm(x_axis)
+    y_axis = np.cross(z_axis, x_axis)
+    y_axis /= np.linalg.norm(y_axis)
+    obj[:3, :3] = np.column_stack((x_axis, y_axis, z_axis))
     obj[:3, 3] = np.asarray(camera['xyz']) + optical.apply([0, 0, distance])
     return obj
 
@@ -34,7 +54,11 @@ def object_path(start, end, tcp_object):
     """SLERP the object, not TCP, keeping its centre fixed during inspection."""
     rotations = Rotation.from_matrix([start[:3, :3], end[:3, :3]])
     angle = (rotations[0].inv() * rotations[1]).magnitude()
-    count = max(1, math.ceil(np.linalg.norm(end[:3, 3]-start[:3, 3])/.002), math.ceil(angle/.04))
+    # Keep adjacent orientation changes small so MoveIt's IK can stay on the
+    # same solution branch during the inspection rotation.  The previous
+    # 0.04-rad angular step could jump across a difficult wrist configuration.
+    # Adjacent orientation waypoints are at most 15 degrees apart.
+    count = max(1, math.ceil(np.linalg.norm(end[:3, 3]-start[:3, 3])/.002), math.ceil(angle/math.radians(15)))
     slerp = Slerp([0, 1], rotations)
     inverse = np.linalg.inv(tcp_object)
     poses = []
@@ -44,3 +68,4 @@ def object_path(start, end, tcp_object):
         obj[:3, :3] = slerp(fraction).as_matrix()
         poses.append(vector(obj @ inverse))
     return poses
+

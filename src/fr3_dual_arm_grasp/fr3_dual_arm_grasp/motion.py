@@ -9,7 +9,7 @@ from geometry_msgs.msg import Pose
 from moveit_msgs.action import MoveGroup, ExecuteTrajectory
 from moveit_msgs.msg import (Constraints, JointConstraint, RobotState,
                              PositionConstraint, OrientationConstraint, DisplayTrajectory)
-from moveit_msgs.srv import GetPositionFK, GetCartesianPath, GetStateValidity
+from moveit_msgs.srv import GetPositionFK, GetPositionIK, GetCartesianPath, GetStateValidity
 from rclpy.action import ActionClient
 from sensor_msgs.msg import JointState
 from shape_msgs.msg import SolidPrimitive
@@ -36,6 +36,7 @@ class DualArmMoveIt:
         self.move = ActionClient(node, MoveGroup, '/move_action')
         self.execute = ActionClient(node, ExecuteTrajectory, '/execute_trajectory')
         self.fk = node.create_client(GetPositionFK, '/compute_fk')
+        self.ik = node.create_client(GetPositionIK, '/compute_ik')
         self.cart = node.create_client(GetCartesianPath, '/compute_cartesian_path')
         self.valid = node.create_client(GetStateValidity, '/check_state_validity')
         self.display = node.create_publisher(DisplayTrajectory, '/display_planned_path', 10)
@@ -297,7 +298,22 @@ class DualArmMoveIt:
     def pose(self, side, values, execute=False, linear=False):
         if linear:
             return self.linear(side, values, execute)
-        return self.poses({side: values}, side + '_arm', execute)
+        # Resolve the TCP target with MoveIt's dedicated IK service first.
+        # The resulting joint target is then planned through OMPL, so collision
+        # checking remains active and IK failures are reported separately.
+        request = GetPositionIK.Request()
+        request.ik_request.group_name = side + '_arm'
+        request.ik_request.ik_link_name = side + '_gripper_tcp'
+        request.ik_request.pose_stamped.header.frame_id = 'world'
+        request.ik_request.pose_stamped.pose = pose_msg(values)
+        request.ik_request.robot_state = self.state()
+        request.ik_request.avoid_collisions = True
+        result = self.service(self.ik, request)
+        if result.error_code.val != 1:
+            raise RuntimeError(f'IK failed for {side} TCP target: code={result.error_code.val}')
+        joints = dict(zip(result.solution.joint_state.name, result.solution.joint_state.position))
+        targets = {f'{side}_j{i}': joints[f'{side}_j{i}'] for i in range(1, 7)}
+        return self.joints(targets, side + '_arm', execute)
 
     def show(self, state, trajectory):
         msg = DisplayTrajectory()
@@ -361,3 +377,4 @@ class DualArmMoveIt:
                     'Cartesian TCP reached despite joint feedback mismatch; '
                     'continuing: %s', joint_error)
         return trajectory
+
