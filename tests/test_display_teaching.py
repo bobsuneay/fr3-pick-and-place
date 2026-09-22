@@ -11,7 +11,7 @@ from fr3_dual_arm_grasp.teaching import TeachingMode
 
 
 def test_camera_center_and_all_interpolated_views_with_offset():
-    camera = dict(xyz=[.06, 0, 1.44], rpy=[0, 1.1, 0])
+    camera = dict(xyz=[.06, 0, 1.44], rpy=[0, np.pi/4, 0])
     offset = matrix([.035, .012, .08, 0, 0, 0, 1])
     taught = [.4, -.2, 1.0] + Rotation.from_euler('xyz', [.2, .3, -.4]).as_quat().tolist()
     neutral = camera_neutral(camera, taught, offset)
