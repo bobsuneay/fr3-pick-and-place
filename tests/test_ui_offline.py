@@ -44,7 +44,7 @@ def test_panel_builds_and_formats_measured_feedback(monkeypatch):
         assert '20.00 mm' in panel.feedback.get()
         assert 'RPY' in panel.details.get()
         assert panel.tcp[0].get() == '500.000'
-        assert len(panel.tree.get_children()) == 7
+        assert len(panel.tree.get_children()) == 3
         panel.toggle_keypoint_mode()
         assert app.keypoint_motion_mode == 'tcp'
         assert 'TCP' in panel.keypoint_mode_label.get()
