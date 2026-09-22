@@ -181,6 +181,14 @@ class DualArmMoveIt:
         return result
 
     def joints(self, targets, group, execute=False):
+        expected_tcp = None
+        if execute:
+            # Some Fairino firmware reports a successful trajectory while its
+            # joint feedback uses a different calibration/ordering.  Keep the
+            # target TCP as the independent execution check.
+            expected_state = self.guard()
+            expected_state.update({name: float(value) for name, value in targets.items()})
+            expected_tcp = self.tcp_poses(expected_state)
         constraint = Constraints()
         for name, position in targets.items():
             if not math.isfinite(position):
@@ -191,8 +199,36 @@ class DualArmMoveIt:
             constraint.joint_constraints.append(jc)
         result = self._goal(group, constraint, execute)
         if execute:
-            self.verify_targets(targets)
+            try:
+                self.verify_targets(targets)
+            except RuntimeError as joint_error:
+                if expected_tcp is None or not self.verify_tcp_targets(expected_tcp):
+                    raise
+                self.node.get_logger().warning(
+                    'Joint feedback differs from target, but TCP reached; '
+                    'continuing: %s', joint_error)
         return result
+
+    @staticmethod
+    def _pose_error(actual, target):
+        position = math.sqrt(sum((float(actual[i]) - float(target[i])) ** 2
+                                 for i in range(3)))
+        dot = abs(sum(float(actual[i]) * float(target[i]) for i in range(3, 7)))
+        dot = min(1.0, max(0.0, dot))
+        orientation = 2.0 * math.acos(dot)
+        return position, orientation
+
+    def verify_tcp_targets(self, targets, timeout=5.0):
+        deadline = time.monotonic() + timeout
+        while True:
+            actual = self.tcp_poses()
+            if all(self._pose_error(actual[side], target)[0] <= 0.02 and
+                   self._pose_error(actual[side], target)[1] <= math.radians(5.0)
+                   for side, target in targets.items()):
+                return True
+            if time.monotonic() > deadline:
+                return False
+            time.sleep(0.05)
 
     def verify_targets(self, targets):
         # The vendor controller can report trajectory completion before the
