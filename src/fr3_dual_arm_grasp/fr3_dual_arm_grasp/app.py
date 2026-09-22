@@ -296,7 +296,7 @@ class DemoApp(Node):
         if name == 'right_grasp':
             target = matrix(pre)
             target[0, 3], target[1, 3] = pre[0], pre[1]
-            target[2, 3] = float(self.scene.scene['table']['top_z']) + 0.010
+            target[2, 3] = float(self.scene.scene['table']['top_z']) + 0.015
             # Keep the taught yaw/roll, but force TCP Z vertically downward.
             z_axis = np.array([0.0, 0.0, -1.0])
             x_axis = target[:3, 0] - np.dot(target[:3, 0], z_axis) * z_axis

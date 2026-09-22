@@ -91,7 +91,7 @@ ros2 launch fr3_dual_arm_grasp grasp.launch.py enable_execution:=false
 ## 5. 采集 3 个核心点
 
 1. `ready`：双臂空手就绪，双夹爪张开；也用于流程结束后的回位。
-2. `right_pregrasp`：右手位于零件上方的预夹取位姿。程序从这个点复制 x/y，把 z 改为桌面上方 10 mm，并将 TCP 轴调整为竖直向下，自动生成 `right_grasp`。
+2. `right_pregrasp`：右手位于零件上方的预夹取位姿。程序从这个点复制 x/y，把 z 改为桌面上方 15 mm，并将 TCP 轴调整为竖直向下，自动生成 `right_grasp`。
 3. `left_place`：左手放置位姿。程序自动生成放置上方点、下降和放置后的抬升路径。
 
 展示点由头部相机光轴中心和 30 cm 距离自动生成；交接中心、左右夹爪间距和姿态由 `demo.yaml` 的 `handover_center_xyz`、`handover_separation_m` 自动生成；左手接取位姿再根据右手实时 TCP 动态对齐。旧文件中的 `right_grasp`、`right_display`、`handover_ready`、`left_receive` 会被保留读取但不再要求重新采集。
@@ -183,7 +183,7 @@ workpiece:
 | 2 | `grip right right_pregrasp` | 右夹爪张开到 `right_pregrasp` 保存的开度，为抓取留出空间。 |
 | 3 | `grip left ready` | 左夹爪张开到 `ready` 保存的开度，避免交接前处于未知状态。 |
 | 4 | `move right right_pregrasp` | 右臂用 OMPL 到达抓取接近点，左臂保持不动但仍参与全机器人碰撞检查。 |
-| 5 | `approach right right_grasp` | 右手从接近点沿 TCP 直线 MoveL 到抓取点；路径不完整、关节跳变或碰撞时不执行。 |
+| 5 | `approach right right_grasp` | 右手从接近点沿 TCP 直线 MoveL 到桌面上方 15 mm 的抓取点；路径不完整、关节跳变或碰撞时不执行。 |
 | 6 | `grasp right right_grasp` | 右夹爪发送完全闭合目标，按 10 N 限力夹紧。允许稳定堵转，然后读取主指反馈换算总开度；连续 5 次变化不超过 0.5 mm 且落在配置范围才认为成功。 |
 | 7 | `attach right` | 软件状态把零件持有者记录为右手，并保存 TCP 到零件的相对变换。默认不向 RViz 发布零件碰撞体。 |
 | 8 | `lift right right_pregrasp` | 右手带件沿直线 MoveL 返回 `right_pregrasp`，形成可控抬升，不允许 OMPL 绕行。 |
