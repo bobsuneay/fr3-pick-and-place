@@ -122,6 +122,7 @@ class FakeApp:
         self.recovery_required = False
         self.dwell = 0
         self.fail_at = fail_at
+        self.grasp_gap = 0.015
         self.motion = SimpleNamespace(guard=self.guard, gripper=self.grip)
         self.scene = SimpleNamespace(owner=None, place_initial=lambda p: self.event('initial'),
                                      attach=self.attach, detach=self.detach,
@@ -187,7 +188,7 @@ def test_recipe_releases_donor_only_after_automatic_receiver_grasp_and_transfer(
     app = FakeApp()
     run_workflow(app)
     e = app.events
-    close_left = e.index(('grip', 'left', 0.0))
+    close_left = e.index(('grip', 'left', 0.015))
     transfer = e.index(('transfer', 'left'))
     release_right = e.index(('grip', 'right', 0.1), transfer)
     assert close_left < e.index(('grasp_ok', 'left'), close_left) < transfer < release_right
@@ -196,7 +197,7 @@ def test_recipe_releases_donor_only_after_automatic_receiver_grasp_and_transfer(
 
 
 @pytest.mark.parametrize('failure', [
-    ('grip', 'left', 0.0), ('grasp_ok', 'left'), ('transfer', 'left'),
+    ('grip', 'left', 0.015), ('grasp_ok', 'left'), ('transfer', 'left'),
     ('move', 'left', 'left_receive'),
 ])
 def test_handover_failure_never_opens_donor(failure):

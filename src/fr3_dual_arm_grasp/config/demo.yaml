@@ -10,11 +10,11 @@ display_pose_joints_deg: [-109, -137, -107, -28, 94, 18]
 # Display turns the part about the head-camera optical axis in one direction.
 display_turn_step_deg: 15
 # 1 turns one way, -1 the other; pick the direction free of joint limits.
-display_turn_direction: 1
+display_turn_direction: -1
 # Extra fixed tilts about the part's X axis after the full Z turn.
 display_x_tilts_deg: [30, -30]
 # Final tilt (about the part X axis) that shows the part's bottom face.
-display_bottom_tilt_deg: 90
+display_bottom_tilt_deg: -90
 handover_centerline_tolerance_m: 0.005
 handover_centerline_angle_deg: 5.0
 handover_center_xyz: [0.35, 0.0, 1.00]
@@ -31,6 +31,8 @@ workpiece:
   # Successful adaptive grasp must stop within this measured total opening.
   grasp_gap_min_m: 0.010
   grasp_gap_max_m: 0.026
+  # Close the fingers until this gap (m) remains between the two pads.
+  grasp_gap_m: 0.015
 
 # Keep dimensions and TCP offset for grasp bookkeeping, but hide the part
 # from RViz and the MoveIt collision scene for this demo.

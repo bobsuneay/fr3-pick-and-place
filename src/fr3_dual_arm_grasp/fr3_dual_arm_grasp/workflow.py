@@ -53,7 +53,8 @@ def _run_step(app, kind, side, key):
             app.verify_handover_alignment()
         # Command the physical closed endpoint; the gripper's internal
         # force limit stops on the part and ROS accepts the stable stall.
-        app.motion.gripper(side, 0.0, execute=True)
+        # Close to a fixed part-sized gap so the two hands do not collide.
+        app.motion.gripper(side, app.grasp_gap, execute=True)
         app.verify_grasp(side)
     elif kind in ('attach', 'transfer'):
         app.scene.attach(side, transfer=(kind == 'transfer'))

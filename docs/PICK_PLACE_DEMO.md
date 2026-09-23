@@ -100,9 +100,9 @@ ros2 launch fr3_dual_arm_grasp grasp.launch.py enable_execution:=false
 
 ### 展示方式和相机位置
 
-展示基准取自 `demo.yaml` 的 `display_pose_joints_deg`（默认 `[-109, -137, -107, -28, 94, 18]` 度），这是一个“夹爪侧对相机、且与光轴垂直”的参考姿态，用于关节空间到达和 IK 种子，不必精确匹配。展示序列为：绕零件自身 Z 轴单向转 180°（每 15° 一个视角，避免大幅改变位姿，足以展示侧面），再绕零件 X 轴 ±30°（`display_x_tilts_deg`），最后绕 X 轴转到 `display_bottom_tilt_deg`（默认 90°）让底部朝向相机；`display_turn_direction` 可设为 −1 反向。
+展示基准取自 `demo.yaml` 的 `display_pose_joints_deg`（默认 `[-109, -137, -107, -28, 94, 18]` 度），这是一个“夹爪侧对相机、且与光轴垂直”的参考姿态，用于关节空间到达和 IK 种子，不必精确匹配。展示序列为：绕零件自身 Z 轴用一条连续笛卡尔路径转 180°（`display_turn_direction` 选方向，默认 −1，避免逐步 15°），再绕零件 X 轴 ±30°（`display_x_tilts_deg`），最后绕 X 轴转到 `display_bottom_tilt_deg`（默认 −90°）让底部朝向相机。
 
-先用关节空间到达参考展示姿态，再按 Z 180° → X ±30° → 底部朝向相机的顺序逐个视角做 IK/OMPL 规划，不再每个视角返回基准。任一视角 IK 无解时会暂停并提示，可点“跳过本步”继续下一个视角。UI 的 MoveL 使用笛卡尔路径，TCP 自由路径使用 IK/OMPL。
+先用关节空间到达参考展示姿态，再用一条连续笛卡尔路径完成 Z 180° 旋转，接着离散执行 X ±30° 和底部视角。任一视角 IK 无解时会暂停并提示，可点“跳过本步”继续下一个视角。UI 的 MoveL 使用笛卡尔路径，TCP 自由路径使用 IK/OMPL。
 
 头部相机默认绕 world Y 轴向下俯视 45°。零件中心位于 `head_camera_optical_frame` 的 `[0, 0, 0.30] m`，即光轴中心前方 30 cm；默认标定对应 world 约 `[0.2721, 0, 1.2279] m`。这不是 TCP 到相机的距离；程序通过 TCP→零件偏移反算双手目标，左手交接后优先使用实际附着变换。示教文件的原始测量不被替换，避免关节角和 TCP 自相矛盾。展示参考点的“规划/执行选中点”也使用相机派生目标，不能选择 both 同时占用展示中心。
 
@@ -187,14 +187,14 @@ workpiece:
 | 4 | `move right right_pregrasp` | 右臂用 OMPL 到达抓取接近点，左臂保持不动但仍参与全机器人碰撞检查。 |
 | 5 | `orient right right_orient` | 右臂在接近点用关节空间把夹爪姿态调整为竖直向下，为直线下降做准备。 |
 | 6 | `approach right right_grasp` | 右手沿 TCP 直线 MoveL 竖直下降到桌面上方 15 mm 的抓取点（姿态已竖直，纯平移路径可靠完成）。 |
-| 7 | `grasp right right_grasp` | 右夹爪发送完全闭合目标，按 10 N 限力夹紧。允许稳定堵转，然后读取主指反馈换算总开度；连续 5 次变化不超过 0.5 mm 且落在配置范围才认为成功。 |
+| 7 | `grasp right right_grasp` | 右夹爪闭合至两爪间只剩 15 mm（`grasp_gap_m`），读取主指反馈换算总开度；连续 5 次变化不超过 0.5 mm 且落在配置范围才认为成功。 |
 | 8 | `attach right` | 软件状态把零件持有者记录为右手，并保存 TCP 到零件的相对变换。默认不向 RViz 发布零件碰撞体。 |
 | 9 | `lift right right_pregrasp` | 右手带件抬升回 `right_pregrasp`（关节空间），形成可控抬升。 |
 | 10 | `scan right right_display` | 右手先到参考展示姿态，再绕零件 Z 轴单向转 180°（每 15°），绕 X 轴 ±30°，最后让底部朝向相机。 |
 | 11 | `move both handover_ready` | 双臂以 `both_arms` 同时规划到交接预备位，避免分别规划造成另一只手成为动态障碍。 |
 | 12 | `touch left` | 若启用零件碰撞体，临时允许左右手指与零件接触；默认隐藏零件时仅更新流程接触状态。 |
 | 13 | `receive left left_receive` | 根据 `handover_center_xyz` 和 `handover_separation_m` 生成交接目标，再读取右手实时 TCP 自动修正左手中心线。修正目标通过左臂 IK、OMPL 和碰撞检测后执行，右臂保持不动。 |
-| 14 | `grasp left left_receive` | 到位后复核中心线横向误差 ≤5 mm、角度误差 ≤5°；通过后左夹爪完全闭合并按实际开度自动确认。失败时右手继续夹持。 |
+| 14 | `grasp left left_receive` | 到位后复核中心线横向误差 ≤5 mm、角度误差 ≤5°；通过后左夹爪闭合至 15 mm 并按实际开度自动确认，避免与右手夹爪相撞。失败时右手继续夹持。 |
 | 15 | `transfer left` | 只有左夹爪确认成功后，软件持有者才从右手切换为左手。 |
 | 16 | `grip right right_pregrasp` | 右夹爪张开到预抓取点保存的开度，正式释放零件。 |
 | 17 | `retreat right` | 右手沿自身 TCP 负 Z 方向直线撤离 `retreat_distance_m`，避免撤离时扫过左夹爪。 |

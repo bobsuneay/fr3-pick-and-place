@@ -97,8 +97,11 @@ class DemoApp(Node):
         offset = pose_vector(config['workpiece']['right_tcp_to_object'])
         self.grasp_gap_min = float(config['workpiece'].get('grasp_gap_min_m', 0.005))
         self.grasp_gap_max = float(config['workpiece'].get('grasp_gap_max_m', 0.04))
+        self.grasp_gap = float(config['workpiece'].get('grasp_gap_m', 0.015))
         if not 0 < self.grasp_gap_min < self.grasp_gap_max < self.open_gap:
             raise ValueError('Workpiece grasp gap range must be inside the calibrated gripper opening')
+        if not self.grasp_gap_min <= self.grasp_gap <= self.grasp_gap_max:
+            raise ValueError('Workpiece grasp gap must lie inside the grasp verification range')
         self.handover_line_tolerance = float(
             config.get('handover_centerline_tolerance_m', 0.005))
         self.handover_angle_tolerance = math.radians(float(
@@ -369,7 +372,10 @@ class DemoApp(Node):
         if name == 'handover_ready':
             center = np.asarray(self.demo_config.get('handover_center_xyz', [0.35, 0.0, 1.0]), dtype=float)
             separation = float(self.demo_config.get('handover_separation_m', 0.16))
-            axis = np.array([1.0, 0.0, 0.0])
+            # Hand over along world Y: both wrists can reach opposing +Y/-Y
+            # approach axes here, whereas the X axis leaves the left arm out of
+            # its reachable orientation space (IK fails).
+            axis = np.array([0.0, 1.0, 0.0])
             z_right, z_left = axis, -axis
             y = np.array([0.0, 0.0, 1.0])
             right_r = np.column_stack((np.cross(y, z_right), y, z_right))
@@ -464,25 +470,41 @@ class DemoApp(Node):
         seed = self._display_seed(side)
         z_axis = neutral[:3, 2]
         x_axis = neutral[:3, 0]
-        maneuvers = []
-        # 1) Full circumference about the part's own Z axis, one direction.
-        for raw_angle in display_views(side, self.display_turn_step_deg):
-            angle = self.display_turn_direction * raw_angle
-            maneuvers.append((z_axis, angle, f'绕零件 Z 轴 {angle}°'))
+
+        # 1) One continuous 180-degree roll about the part's own Z axis.
+        self.motion.guard(True)
+        turn = int(round(self.display_turn_direction * 180.0))
+        self.publish(f'{side} 展示：绕零件 Z 轴连续转 {turn}°')
+        step = int(self.display_turn_step_deg)
+        angles = list(range(0, 180, step)) + [180]
+        waypoints = []
+        for raw in angles:
+            target = neutral.copy()
+            target[:3, :3] = (Rotation.from_rotvec(z_axis * math.radians(self.display_turn_direction * raw)).as_matrix()
+                              @ neutral[:3, :3])
+            waypoints.append(vector(target @ np.linalg.inv(offset)))
+        self.motion.cartesian(side, waypoints, execute=True)
+
         # 2) Fixed tilts about the part's X axis.
         for tilt in self.display_x_tilts_deg:
-            maneuvers.append((x_axis, tilt, f'绕零件 X 轴 {tilt}°'))
-        # 3) Show the part's bottom face toward the camera.
-        maneuvers.append((x_axis, self.display_bottom_tilt_deg, '零件底部朝向相机'))
-        for index, (axis, angle, label) in enumerate(maneuvers, 1):
             self.motion.guard(True)
-            self.publish(f'{side} 展示 {index}/{len(maneuvers)}：{label}')
+            self.publish(f'{side} 展示：绕零件 X 轴 {tilt}°')
             target = neutral.copy()
-            target[:3, :3] = (Rotation.from_rotvec(np.asarray(axis) * math.radians(angle)).as_matrix()
+            target[:3, :3] = (Rotation.from_rotvec(x_axis * math.radians(tilt)).as_matrix()
                               @ neutral[:3, :3])
             self.motion.pose(side, vector(target @ np.linalg.inv(offset)), execute=True, seed=seed)
             if self.stop_event.wait(self.dwell):
                 raise RuntimeError('展示已停止')
+
+        # 3) Show the part's bottom face toward the camera.
+        self.motion.guard(True)
+        self.publish(f'{side} 展示：零件底部朝向相机')
+        target = neutral.copy()
+        target[:3, :3] = (Rotation.from_rotvec(x_axis * math.radians(self.display_bottom_tilt_deg)).as_matrix()
+                          @ neutral[:3, :3])
+        self.motion.pose(side, vector(target @ np.linalg.inv(offset)), execute=True, seed=seed)
+        if self.stop_event.wait(self.dwell):
+            raise RuntimeError('展示已停止')
 
     def retreat_donor(self):
         tcp = matrix(self.motion.tcp_poses()['right'])

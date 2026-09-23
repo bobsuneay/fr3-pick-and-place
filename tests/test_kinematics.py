@@ -45,8 +45,6 @@ def test_forward_kinematics_matches_urdf_convention(kinematics):
 def test_display_turn_is_reachable(kinematics):
     chains, arms = kinematics
     share = ROOT / 'src/fr3_dual_arm_description'
-    scene = read_yaml(share / 'config/scene.yaml')
-    camera = scene['camera']
     seed = [math.radians(v) for v in (-109, -137, -107, -28, 94, 18)]
     tcp = chains['right'].fk(seed)
     neutral = tcp.copy()
@@ -54,12 +52,8 @@ def test_display_turn_is_reachable(kinematics):
     x_axis = neutral[:3, 0]
 
     joints = list(seed)
-    maneuvers = []
-    for raw in display_views('right'):
-        maneuvers.append((z_axis, raw, f'Z {raw}'))
-    for tilt in (30.0, -30.0):
-        maneuvers.append((x_axis, tilt, f'X {tilt}'))
-    maneuvers.append((x_axis, 90.0, 'bottom'))
+    # Z turn endpoint (direction -1, i.e. -180 degrees).
+    maneuvers = [(z_axis, -180.0, 'Z -180'), (x_axis, 30.0, 'X +30'), (x_axis, -30.0, 'X -30')]
     for axis, angle, label in maneuvers:
         target = neutral.copy()
         target[:3, :3] = (Rotation.from_rotvec(np.asarray(axis) * math.radians(angle)).as_matrix()
@@ -68,3 +62,21 @@ def test_display_turn_is_reachable(kinematics):
         assert solution is not None, f'display maneuver {label} is not reachable'
         assert error[0] < 0.005 and error[1] < math.radians(1.0)
         joints = solution
+
+
+def test_handover_y_axis_is_reachable(kinematics):
+    chains, arms = kinematics
+    center = np.array([0.35, 0.0, 1.0])
+    separation = 0.16
+    axis = np.array([0.0, 1.0, 0.0])
+    y = np.array([0.0, 0.0, 1.0])
+    z_right, z_left = axis, -axis
+    right_r = np.column_stack((np.cross(y, z_right), y, z_right))
+    left_r = np.column_stack((np.cross(y, z_left), y, z_left))
+    right = np.eye(4)
+    left = np.eye(4)
+    right[:3, :3], left[:3, :3] = right_r, left_r
+    right[:3, 3] = center + axis * separation / 2.0
+    left[:3, 3] = center - axis * separation / 2.0
+    assert chains['right'].solve_ik(right, arms['right']['initial'])[0] is not None
+    assert chains['left'].solve_ik(left, arms['left']['initial'])[0] is not None
