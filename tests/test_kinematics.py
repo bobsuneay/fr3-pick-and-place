@@ -69,10 +69,11 @@ def test_handover_y_axis_is_reachable(kinematics):
     center = np.array([0.35, 0.0, 1.0])
     separation = 0.16
     axis = np.array([0.0, 1.0, 0.0])
-    y = np.array([0.0, 0.0, 1.0])
     z_right, z_left = axis, -axis
-    right_r = np.column_stack((np.cross(y, z_right), y, z_right))
-    left_r = np.column_stack((np.cross(y, z_left), y, z_left))
+    y_right = np.array([0.0, 0.0, 1.0])
+    y_left = np.array([1.0, 0.0, 0.0])
+    right_r = np.column_stack((np.cross(y_right, z_right), y_right, z_right))
+    left_r = np.column_stack((np.cross(y_left, z_left), y_left, z_left))
     right = np.eye(4)
     left = np.eye(4)
     right[:3, :3], left[:3, :3] = right_r, left_r

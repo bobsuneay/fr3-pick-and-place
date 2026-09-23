@@ -377,9 +377,13 @@ class DemoApp(Node):
             # its reachable orientation space (IK fails).
             axis = np.array([0.0, 1.0, 0.0])
             z_right, z_left = axis, -axis
-            y = np.array([0.0, 0.0, 1.0])
-            right_r = np.column_stack((np.cross(y, z_right), y, z_right))
-            left_r = np.column_stack((np.cross(y, z_left), y, z_left))
+            # The two approach axes are collinear (+Y / -Y); roll the left
+            # fingers 90 degrees about Z so the hands interleave without
+            # colliding when both close on the same part.
+            y_right = np.array([0.0, 0.0, 1.0])
+            y_left = np.array([1.0, 0.0, 0.0])
+            right_r = np.column_stack((np.cross(y_right, z_right), y_right, z_right))
+            left_r = np.column_stack((np.cross(y_left, z_left), y_left, z_left))
             right = np.eye(4); left = np.eye(4)
             right[:3, :3], left[:3, :3] = right_r, left_r
             right[:3, 3] = center + axis * separation / 2.0
@@ -420,8 +424,10 @@ class DemoApp(Node):
                 # Orient in joint space, descend straight with MoveL; a pure
                 # vertical translation completes the Cartesian path reliably.
                 return self.motion.pose('right', generated['right']['tcp'], execute, linear=linear)
-            return self.motion.poses(
-                {s: generated[s]['tcp'] for s in SIDES}, 'both_arms', execute)
+            # Move the two hands one at a time so they never plan as a single
+            # both_arms goal; the right hand goes first, then the left.
+            self.motion.pose('right', generated['right']['tcp'], execute)
+            return self.motion.pose('left', generated['left']['tcp'], execute)
         point = deepcopy(self.book.points[name])
         self.book.validate_point(point)
         sides = SIDES if side == 'both' else (side,)
@@ -488,13 +494,16 @@ class DemoApp(Node):
         # 2) Fixed tilts about the part's X axis.
         for tilt in self.display_x_tilts_deg:
             self.motion.guard(True)
-            self.publish(f'{side} 展示：绕零件 X 轴 {tilt}°')
+            self.publish(f'{side} 展示：绕零件 X 轴 {tilt}°（零件中心保持不动）')
             target = neutral.copy()
             target[:3, :3] = (Rotation.from_rotvec(x_axis * math.radians(tilt)).as_matrix()
                               @ neutral[:3, :3])
-            self.motion.pose(side, vector(target @ np.linalg.inv(offset)), execute=True, seed=seed)
+            # Rotate about the part centre, then return to neutral before the
+            # next tilt so the part centre never swings away.
+            self.motion.cartesian(side, object_path(neutral, target, offset), execute=True)
             if self.stop_event.wait(self.dwell):
                 raise RuntimeError('展示已停止')
+            self.motion.cartesian(side, object_path(target, neutral, offset), execute=True)
 
         # 3) Show the part's bottom face toward the camera.
         self.motion.guard(True)
