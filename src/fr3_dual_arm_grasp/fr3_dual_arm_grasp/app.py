@@ -494,16 +494,17 @@ class DemoApp(Node):
         # 2) Fixed tilts about the part's X axis.
         for tilt in self.display_x_tilts_deg:
             self.motion.guard(True)
-            self.publish(f'{side} 展示：绕零件 X 轴 {tilt}°（零件中心保持不动）')
+            self.publish(f'{side} 展示：绕零件 X 轴 {tilt}°')
             target = neutral.copy()
             target[:3, :3] = (Rotation.from_rotvec(x_axis * math.radians(tilt)).as_matrix()
                               @ neutral[:3, :3])
-            # Rotate about the part centre, then return to neutral before the
-            # next tilt so the part centre never swings away.
-            self.motion.cartesian(side, object_path(neutral, target, offset), execute=True)
+            # Pitching about the TCP X axis is not a pure wrist roll, so a
+            # Cartesian path only covers a few percent.  Resolve with IK seeded
+            # from the reference posture and return to neutral between tilts.
+            self.motion.pose(side, vector(target @ np.linalg.inv(offset)), execute=True, seed=seed)
             if self.stop_event.wait(self.dwell):
                 raise RuntimeError('展示已停止')
-            self.motion.cartesian(side, object_path(target, neutral, offset), execute=True)
+            self.motion.pose(side, vector(neutral @ np.linalg.inv(offset)), execute=True, seed=seed)
 
         # 3) Show the part's bottom face toward the camera.
         self.motion.guard(True)
