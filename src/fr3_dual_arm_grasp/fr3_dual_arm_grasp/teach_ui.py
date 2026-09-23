@@ -59,8 +59,8 @@ class TeachUI:
         ttk.Label(top, text=f'  {mode}  |  TCP: world → gripper_tcp').pack(side='left', padx=16)
         speed_row = ttk.Frame(self.root, padding=6)
         speed_row.pack(fill='x')
-        ttk.Label(speed_row, text='运行速度（1–80%）').pack(side='left')
-        ttk.Scale(speed_row, from_=1, to=80, variable=self.speed, command=self.change_speed).pack(side='left', fill='x', expand=True)
+        ttk.Label(speed_row, text='运行速度（0–100%）').pack(side='left')
+        ttk.Scale(speed_row, from_=0, to=100, variable=self.speed, command=self.change_speed).pack(side='left', fill='x', expand=True)
         ttk.Label(speed_row, textvariable=self.speed_label, width=48).pack(side='left')
         self.speed_label.set(f'{self.app.motion.speed:.0%} · 下一段规划生效')
         self.point_mode_button = ttk.Button(

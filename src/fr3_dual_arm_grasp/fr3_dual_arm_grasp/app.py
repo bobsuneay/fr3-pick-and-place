@@ -137,6 +137,15 @@ class DemoApp(Node):
                     for v in self.display_x_tilts_deg)):
             raise ValueError('display_x_tilts_deg must be a list of finite angles')
         self.display_x_tilts_deg = [float(v) for v in self.display_x_tilts_deg]
+        self.display_preset_deg = config.get('display_preset_deg', {})
+        if not isinstance(self.display_preset_deg, dict):
+            raise ValueError('display_preset_deg must be a per-hand mapping')
+        self.display_preset_deg = {
+            side: float(value) for side, value in self.display_preset_deg.items()
+            if side in ('left', 'right')}
+        self.grasp_clearance = float(config.get('grasp_clearance_m', 0.015))
+        if not 0.001 <= self.grasp_clearance <= 0.10:
+            raise ValueError('grasp_clearance_m must be 1..100 mm')
         self.skip_event = threading.Event()
         self.awaiting_skip = False
         self.retreat_distance = float(config.get('retreat_distance_m', 0.06))
@@ -221,9 +230,9 @@ class DemoApp(Node):
 
     def set_speed(self, percent):
         value = float(percent) / 100
-        if not math.isfinite(value) or not 0.01 <= value <= 0.8:
-            raise ValueError('速度范围为 1%–80%')
-        self.motion.speed = value
+        if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+            raise ValueError('速度范围为 0%–100%')
+        self.motion.speed = max(value, 0.01)
         self.publish(f'速度 {percent:.0f}%：下一段规划生效，当前运动不突变')
 
     def set_keypoint_motion_mode(self, mode):
@@ -366,15 +375,15 @@ class DemoApp(Node):
         if name in ('right_orient', 'right_grasp'):
             target = matrix(pre)
             if name == 'right_grasp':
-                target[2, 3] = float(self.scene.scene['table']['top_z']) + 0.015
+                target[2, 3] = float(self.scene.scene['table']['top_z']) + self.grasp_clearance
             # Keep the taught yaw/roll, but force TCP Z vertically downward.
             self._force_tcp_down(target)
             return self._generated_point(vector(target), 0.0)
         if name == 'left_place':
-            # Mirror of the right pickup: place at the taught x/y but a fixed
-            # 18 mm above the table with the gripper pointing straight down.
+            # Mirror of the right pickup: place at the taught x/y but the same
+            # clearance above the table as the pickup, gripper pointing down.
             place = matrix(self.book.points['left_place']['left']['tcp'])
-            place[2, 3] = float(self.scene.scene['table']['top_z']) + 0.018
+            place[2, 3] = float(self.scene.scene['table']['top_z']) + self.grasp_clearance
             self._force_tcp_down(place)
             return self._generated_point(vector(place), 0.0)
         if name == 'handover_ready':
@@ -497,6 +506,10 @@ class DemoApp(Node):
             taught = matrix(self.book.points['right_pregrasp']['right']['tcp'])
             base = (taught @ matrix(self.scene.offset))[:3, :3]
         obj[:3, :3] = base
+        preset = self.display_preset_deg.get(side, 0.0)
+        if preset:
+            # Pre-roll the part about its own axis before the display turn.
+            obj[:3, :3] = obj[:3, :3] @ Rotation.from_euler('z', preset, degrees=True).as_matrix()
         return obj
 
     def move_display_neutral(self, side, execute=False):

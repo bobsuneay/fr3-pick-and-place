@@ -13,6 +13,13 @@ display_turn_step_deg: 15
 display_turn_direction: -1
 # Extra fixed tilts about the part's X axis after the full Z turn.
 display_x_tilts_deg: [30, -30]
+# Pre-roll of the part about its own axis before the 180-degree display turn,
+# per hand.  The left hand needs 90 degrees so the part faces the camera.
+display_preset_deg:
+  left: 90
+  right: 0
+# Height of the grasp/place TCP above the table for the pickup and the drop.
+grasp_clearance_m: 0.015
 handover_centerline_tolerance_m: 0.010
 handover_centerline_angle_deg: 5.0
 handover_center_xyz: [0.35, 0.0, 1.00]
