@@ -56,4 +56,4 @@ def run_workflow(app):
             app.scene.detach()
     app.scene.allow([], table=True)
     app.recovery_required = False
-    app.publish('完成：右手抓取→展示→左手交接→展示→放下')
+    app.publish('完成：右手抓取→向头部相机多角度展示→左手接取→放下')

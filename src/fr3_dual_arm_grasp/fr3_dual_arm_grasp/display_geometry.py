@@ -3,16 +3,30 @@ import math
 import numpy as np
 from scipy.spatial.transform import Rotation, Slerp
 
-def display_views(side, z_sign=1):
-    """Rotate about the +45-degree presentation baseline, without an extra X flip."""
+# The part is an upright cylinder, so rotating about its own Z axis changes
+# nothing in the camera.  The meaningful views tilt the object about its
+# transverse X/Y axes to reveal the end faces and the curved side.  Avoid the
+# exact +/-90 and +/-180 degree singularities and keep each step a small,
+# reliably reachable fixed-axis rotation.
+_DISPLAY_TILTS = (60, -60, 120)
+_DISPLAY_YS = (60, -60)
+VIEWS = ([[0, 0, 0]] +
+         [[angle, 0, 0] for angle in _DISPLAY_TILTS] +
+         [[0, angle, 0] for angle in _DISPLAY_YS])
+
+
+def display_views(side):
+    """Return a short, IK-friendly inspection sequence for one arm.
+
+    The neutral pose is implicit: the caller presents each view and returns to
+    neutral afterwards, so every non-zero view is reached from the same stable
+    neutral solution rather than from the previous tilted configuration.
+    """
     if side not in ('left', 'right'):
         raise ValueError('Display side must be left or right')
-    z_sign = 1 if z_sign >= 0 else -1
-    return [[0, 0, z_sign * angle] for angle in range(0, 361, 15)]
-
-
-# Compatibility export; the application and tests use display_views directly.
-VIEWS = display_views('right')
+    sign = 1 if side == 'right' else -1
+    return ([[sign * angle, 0, 0] for angle in _DISPLAY_TILTS] +
+            [[0, sign * angle, 0] for angle in _DISPLAY_YS])
 
 
 def matrix(pose):
@@ -55,4 +69,3 @@ def object_path(start, end, tcp_object):
         obj[:3, :3] = slerp(fraction).as_matrix()
         poses.append(vector(obj @ inverse))
     return poses
-

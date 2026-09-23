@@ -100,9 +100,9 @@ ros2 launch fr3_dual_arm_grasp grasp.launch.py enable_execution:=false
 
 ### 展示方式和相机位置
 
-展示基准由示教的右手预抓取零件姿态绕其局部 X 轴旋转 +45° 得到，不再叠加旧的 X −90°翻转。左右手通过各自 TCP→零件变换使用同一个零件基准。实际序列由 `display_views()` 生成，共 25 个视角：基准姿态及 Z 轴每隔 15°直到 360°的相对旋转；`display_z_direction` 可设为 −1 反向展示（默认 +1）。日志角度相对于展示基准，不是 world 绝对 RPY。
+展示基准由示教的右手预抓取零件姿态绕其局部 X 轴旋转 +45° 得到，不再叠加旧的 X −90°翻转。竖直圆柱绕自身 Z 轴旋转在相机里没有变化，因此实际序列改为 5 个短视角：绕零件 X 轴 ±60°、+120°，以及绕 Y 轴 ±60°，足以展示端面和侧面；每个视角结束后都返回基准，不累积腕部转角。
 
-先用 IK/OMPL 到达展示中心，再在相邻视角间绕零件中心做 SLERP 插值并检查完整笛卡尔路径，不在每个视角间返回基准。路径不完整、碰撞或关节跳变会停止并报告失败视角，不跳过、不改用自由路径绕行。整圈旋转是否可达取决于现场状态和关节限位。`display_z_test_only` 仅规划独立目标，不执行连续旋转。UI 的 MoveL 使用笛卡尔路径，TCP 自由路径使用 IK/OMPL。
+先用 IK/OMPL 到达展示中心，再从基准到每个视角各做一次关节空间规划，结束后回到基准。每个视角独立规划，任一视角失败会停止并报告失败视角，不跳过、不改用自由路径绕行。UI 的 MoveL 使用笛卡尔路径，TCP 自由路径使用 IK/OMPL。
 
 头部相机默认绕 world Y 轴向下俯视 45°。零件中心位于 `head_camera_optical_frame` 的 `[0, 0, 0.30] m`，即光轴中心前方 30 cm；默认标定对应 world 约 `[0.2721, 0, 1.2279] m`。这不是 TCP 到相机的距离；程序通过 TCP→零件偏移反算双手目标，左手交接后优先使用实际附着变换。示教文件的原始测量不被替换，避免关节角和 TCP 自相矛盾。展示参考点的“规划/执行选中点”也使用相机派生目标，不能选择 both 同时占用展示中心。
 
@@ -175,7 +175,7 @@ workpiece:
 
 实际开度小于下限通常表示没有夹到零件而接近全闭；大于上限表示夹到错误位置或其他障碍。这个判断没有零件身份识别、触觉确认或掉落检测。
 
-### 6.2 完整 Demo 的 25 步
+### 6.2 完整 Demo 的 24 步
 
 每个运动步骤开始前都会检查停止请求、反馈新鲜度和当前机器人状态。普通远距离运动使用 MoveIt IK/OMPL；标记为 MoveL 的步骤使用 `/compute_cartesian_path`，要求路径覆盖率 100%，以 2 mm 步长进行碰撞检查，再交给 `/execute_trajectory`。夹爪通过 MoveIt `GripperCommand`、`ros2_control` 和法奥 `MoveGripper` 到达实机。
 
@@ -189,7 +189,7 @@ workpiece:
 | 6 | `grasp right right_grasp` | 右夹爪发送完全闭合目标，按 10 N 限力夹紧。允许稳定堵转，然后读取主指反馈换算总开度；连续 5 次变化不超过 0.5 mm 且落在配置范围才认为成功。 |
 | 7 | `attach right` | 软件状态把零件持有者记录为右手，并保存 TCP 到零件的相对变换。默认不向 RViz 发布零件碰撞体。 |
 | 8 | `lift right right_pregrasp` | 右手带件沿直线 MoveL 返回 `right_pregrasp`，形成可控抬升，不允许 OMPL 绕行。 |
-| 9 | `scan right right_display` | 右手先用 OMPL 到头部相机光轴中心前 30 cm 的展示中心，再按 25 个 Z 轴相对视角绕零件中心连续插值旋转，无额外 X −90°翻转。 |
+| 9 | `scan right right_display` | 右手先用 OMPL 到头部相机光轴中心前 30 cm 的展示中心，再按 5 个短视角绕零件中心做 XYZ 相对旋转；每个视角结束后返回基准。 |
 | 10 | `move both handover_ready` | 双臂以 `both_arms` 同时规划到交接预备位，避免分别规划造成另一只手成为动态障碍。 |
 | 11 | `touch left` | 若启用零件碰撞体，临时允许左右手指与零件接触；默认隐藏零件时仅更新流程接触状态。 |
 | 12 | `receive left left_receive` | 根据 `handover_center_xyz` 和 `handover_separation_m` 生成交接目标，再读取右手实时 TCP 自动修正左手中心线。修正目标通过左臂 IK、OMPL 和碰撞检测后执行，右臂保持不动。 |
@@ -199,13 +199,12 @@ workpiece:
 | 16 | `retreat right` | 右手沿自身 TCP 负 Z 方向直线撤离 `retreat_distance_m`，避免撤离时扫过左夹爪。 |
 | 17 | `touch_only left` | 接触状态收紧为只允许左手持有零件。 |
 | 18 | `move right ready` | 右臂用 OMPL 回到安全就绪位，左手继续持件。 |
-| 19 | `scan left right_display` | 根据左手当前 TCP 到零件的相对变换，计算同一相机展示中心和 25 个零件视角，由左手完成展示。 |
-| 20 | `preplace left` | 从 `left_place` 沿 world +Z 增加 `place_clearance_m` 得到放置上方点，使用 OMPL 到达。 |
-| 21 | `place left` | 左手从上方点直线 MoveL 下降到示教的放置位。 |
-| 22 | `grip left ready` | 左夹爪自动张开到 `ready` 开度，放下零件；此处已按要求取消人工确认。 |
-| 23 | `detach left` | 软件清除左手持有者并记录零件最终世界位姿；默认不显示零件碰撞体。 |
-| 24 | `preplace left` | 左手从放置点沿 world +Z 直线抬升到安全高度。 |
-| 25 | `move left ready` | 左臂用 OMPL 回到 `ready`，清除恢复锁并报告完整流程完成。 |
+| 19 | `preplace left` | 从 `left_place` 沿 world +Z 增加 `place_clearance_m` 得到放置上方点，使用 OMPL 到达。 |
+| 20 | `place left` | 左手从上方点直线 MoveL 下降到示教的放置位。 |
+| 21 | `grip left ready` | 左夹爪自动张开到 `ready` 开度，放下零件；此处已按要求取消人工确认。 |
+| 22 | `detach left` | 软件清除左手持有者并记录零件最终世界位姿；默认不显示零件碰撞体。 |
+| 23 | `preplace left` | 左手从放置点沿 world +Z 直线抬升到安全高度。 |
+| 24 | `move left ready` | 左臂用 OMPL 回到 `ready`，清除恢复锁并报告完整流程完成。 |
 
 任一步失败都会停止后续步骤。抓取后发生失败时不会自动张开当前持有零件的夹爪；交接步骤中，左手未通过中心线和开度检查时右手不会松开。
 

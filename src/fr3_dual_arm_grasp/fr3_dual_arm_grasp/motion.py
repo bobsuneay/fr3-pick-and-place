@@ -28,11 +28,15 @@ def pose_values(pose):
 
 
 class DualArmMoveIt:
-    def __init__(self, node, feedback, stop, enabled=False, speed=0.1):
+    def __init__(self, node, feedback, stop, enabled=False, speed=0.1, kinematics=None):
         if not 0 < speed <= 0.3:
             raise ValueError('Demo speed must be > 0 and <= 0.3')
         self.node, self.feedback, self.stop = node, feedback, stop
         self.enabled, self.speed = enabled, speed
+        # Offline analytic chains used for a robust numeric IK fallback. The
+        # value is a dict of side -> fr3_dual_arm_grasp.kinematics.ArmChain.
+        self.kinematics = kinematics or {}
+        self.seed_joints = {}
         self.move = ActionClient(node, MoveGroup, '/move_action')
         self.execute = ActionClient(node, ExecuteTrajectory, '/execute_trajectory')
         self.fk = node.create_client(GetPositionFK, '/compute_fk')
@@ -280,7 +284,54 @@ class DualArmMoveIt:
             joint_targets.update(self._ik_joints(side, values))
         return self.joints(joint_targets, group, execute)
 
+    def _fk_pose(self, side, joints):
+        """Resolve one TCP pose from six joint values via MoveIt FK."""
+        values = self.guard()
+        for index, value in enumerate(joints, 1):
+            values[f'{side}_j{index}'] = float(value)
+        request = GetPositionFK.Request()
+        request.header.frame_id = 'world'
+        request.fk_link_names = [side + '_gripper_tcp']
+        request.robot_state = self.state(values)
+        result = self.service(self.fk, request)
+        if result.error_code.val != 1 or len(result.pose_stamped) != 1:
+            raise RuntimeError(f'FK failed for {side}')
+        return pose_values(result.pose_stamped[0].pose)
+
+    def _numeric_ik_joints(self, side, values):
+        """Robust numeric IK fallback; returns a joint dict or ``None``."""
+        chain = getattr(self, 'kinematics', {}).get(side)
+        if chain is None:
+            return None
+        from fr3_dual_arm_grasp.kinematics import pose_to_matrix
+        target = pose_to_matrix(values)
+        current = self.guard()
+        seeds = [[current[f'{side}_j{i}'] for i in range(1, 7)]]
+        taught = getattr(self, 'seed_joints', {}).get(side)
+        if taught is not None:
+            seeds.append(taught)
+        for seed in seeds:
+            solution, _error = chain.solve_ik(target, seed)
+            if solution is None:
+                continue
+            try:
+                actual = self._fk_pose(side, solution)
+            except Exception:
+                return None
+            position_error, orientation_error = self._pose_error(actual, values)
+            if position_error <= 0.005 and orientation_error <= math.radians(1.0):
+                return {f'{side}_j{i}': float(solution[i - 1]) for i in range(1, 7)}
+        return None
+
     def _ik_joints(self, side, values):
+        numeric = self._numeric_ik_joints(side, values)
+        if numeric is not None:
+            try:
+                self.check_state(numeric)
+            except RuntimeError:
+                numeric = None
+            else:
+                return numeric
         request = GetPositionIK.Request()
         request.ik_request.group_name = side + '_arm'
         request.ik_request.ik_link_name = side + '_gripper_tcp'
@@ -364,4 +415,3 @@ class DualArmMoveIt:
                     'Cartesian TCP reached despite joint feedback mismatch; '
                     'continuing: %s', joint_error)
         return trajectory
-

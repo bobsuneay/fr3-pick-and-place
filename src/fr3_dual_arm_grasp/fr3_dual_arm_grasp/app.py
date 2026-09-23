@@ -28,6 +28,8 @@ from .demo_scene import DemoScene
 from .workflow import run_workflow
 from .display_geometry import matrix, vector, camera_neutral, object_path, display_views
 from .teaching import TeachingMode, robot_mode
+from .kinematics import build_kinematics
+from fr3_dual_arm_description.model import build_model
 
 
 class DemoApp(Node):
@@ -56,6 +58,11 @@ class DemoApp(Node):
             from fr3_dual_arm_description.model import validate_hardware
             hardware = validate_hardware(yaml.safe_load(Path(param('hardware')).expanduser().read_text(encoding='utf-8')))
             self.robot_ips = {side: hardware[side]['robot_ip'] for side in SIDES}
+        description_share = get_package_share_directory('fr3_dual_arm_description')
+        self.kinematics = build_kinematics(
+            build_model(description_share, self.scene_file, arms, mode='mock'),
+            arms,
+        )
         self.open_gap = float(arms['gripper']['open_gap'])
         self.feedback = Feedback(max_age=1.0)
         self.stop_event = threading.Event()
@@ -63,7 +70,10 @@ class DemoApp(Node):
         self.worker = None
         self.status_text = '就绪：等待机器人反馈'
         self.recovery_required = False
-        self.motion = DualArmMoveIt(self, self.feedback, self.stop_event, param('enable_execution'), param('speed'))
+        self.motion = DualArmMoveIt(
+            self, self.feedback, self.stop_event, param('enable_execution'), param('speed'),
+            kinematics=self.kinematics,
+        )
         self.switch_clients = {side: self.create_client(SwitchController,
             f'/{side}_controller_manager/switch_controller') for side in SIDES}
         self.list_clients = {side: self.create_client(ListControllers,
@@ -120,6 +130,7 @@ class DemoApp(Node):
             except Exception as exc:
                 self.load_error = str(exc)
                 self.status_text = '示教文件未载入：' + self.load_error
+        self._refresh_kinematics_seed()
         self.latest_capture = None
         # UI-selectable policy for ordinary taught points. Display and
         # Cartesian approach/retreat segments remain TCP-based in both modes.
@@ -141,6 +152,16 @@ class DemoApp(Node):
 
     def on_joints(self, msg):
         self.feedback.update(msg.name, msg.position)
+
+    def _refresh_kinematics_seed(self):
+        """Seed the numeric IK with the taught, guaranteed-reachable ready pose."""
+        ready = self.book.points.get('ready')
+        if ready is None:
+            self.motion.seed_joints = {}
+            return
+        self.motion.seed_joints = {
+            side: list(ready[side]['joints']) for side in SIDES
+        }
 
     def update_live_pose(self):
         # Non-blocking and independent of motion cancellation/operation lock.
@@ -284,6 +305,7 @@ class DemoApp(Node):
                 raise RuntimeError('已有文件未能载入，请先选择新的保存路径，避免覆盖：' + self.load_error)
             self.book.record(name, point)
             self.book.save(self.points_file)
+            self._refresh_kinematics_seed()
         return point
 
     def _generated_point(self, tcp, gap=0.0):
@@ -357,11 +379,9 @@ class DemoApp(Node):
     def tcp_object(self, side):
         if self.scene.owner == side and self.scene.local_pose is not None:
             return matrix(self.scene.local_pose)
-        right = matrix(self.scene.offset)
-        if side == 'right':
-            return right
-        receive = self.book.points['left_receive']
-        return np.linalg.inv(matrix(receive['left']['tcp'])) @ matrix(receive['right']['tcp']) @ right
+        if side == 'left':
+            raise RuntimeError('左手展示仅能在交接完成后进行')
+        return matrix(self.scene.offset)
 
     def display_neutral(self):
         # The stored measured joints/TCP remain unchanged; derive targets at use time.
@@ -375,41 +395,20 @@ class DemoApp(Node):
 
     def scan_display(self, side):
         neutral, offset = self.display_neutral(), self.tcp_object(side)
-        test_only = bool(self.demo_config.get('display_z_test_only', False))
-        if test_only:
-            views = ([[0, 0, 0]] +
-                     [[0, 0, angle] for angle in range(15, 181, 15)] +
-                     [[0, 0, angle] for angle in range(165, -181, -15)])
-            execute = False
-        else:
-            self.move_display_neutral(side, True)
-            z_sign = int(self.demo_config.get('display_z_direction', 1))
-            views = display_views(side, z_sign)
-            execute = True
-        previous = neutral
+        self.move_display_neutral(side, True)
+        views = display_views(side)
         for index, angles in enumerate(views, 1):
-            self.motion.guard(execute)
-            self.publish(f'{side} 展示 {index}/{len(views)}，相对展示基准 RPY {angles}°')
+            self.motion.guard(True)
+            self.publish(f'{side} 展示 {index}/{len(views)}，零件 RPY {angles}°')
             target = neutral.copy()
-            target[:3, :3] = neutral[:3, :3] @ Rotation.from_euler(
-                'xyz', angles, degrees=True).as_matrix()
-            if index > 1:
-                try:
-                    if execute:
-                        # Interpolate the object centre between adjacent views;
-                        # never replace a failed inspection path with an OMPL detour.
-                        self.motion.cartesian(side, object_path(previous, target, offset), True)
-                    else:
-                        # Preview targets independently: the robot has not moved
-                        # to the previous preview's endpoint.
-                        self.motion.pose(side, vector(target @ np.linalg.inv(offset)), False)
-                except RuntimeError as exc:
-                    raise RuntimeError(
-                        f'{side} 展示 {index}/{len(views)}，相对展示基准 RPY {angles}°失败：{exc}'
-                    ) from exc
-            previous = target
-            if execute and self.stop_event.wait(self.dwell):
+            target[:3, :3] = (neutral[:3, :3] @
+                              Rotation.from_euler('xyz', angles, degrees=True).as_matrix())
+            self.motion.pose(side, vector(target @ np.linalg.inv(offset)), execute=True)
+            if self.stop_event.wait(self.dwell):
                 raise RuntimeError('展示已停止')
+            # Return to neutral so every view starts from the same stable
+            # configuration and wrist turns never accumulate.
+            self.motion.pose(side, vector(neutral @ np.linalg.inv(offset)), execute=True)
 
     def retreat_donor(self):
         tcp = matrix(self.motion.tcp_poses()['right'])
@@ -523,11 +522,6 @@ class DemoApp(Node):
     def start_demo(self):
         if not self.commissioned:
             raise RuntimeError('请核对工作台 / 零件尺寸和 TCP 偏移，并在 demo.yaml 设置 scene_and_object_verified: true')
-        if self.demo_config.get('display_z_test_only', False):
-            self.initialize_scene()
-            self.scan_display('right')
-            self.publish('Z 轴整圈展示规划测试完成：未执行机器人运动')
-            return
         run_workflow(self)
 
     def recover(self):
@@ -570,4 +564,3 @@ def main():
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
-

@@ -193,7 +193,7 @@ def recipe():
         ('receive', 'left', 'left_receive'), ('grasp', 'left', 'left_receive'),
         ('transfer', 'left', ''), ('grip', 'right', 'right_pregrasp'),
         ('retreat', 'right', ''), ('touch_only', 'left', ''),
-        ('move', 'right', 'ready'), ('scan', 'left', 'right_display'),
+        ('move', 'right', 'ready'),
         ('preplace', 'left', ''), ('place', 'left', ''),
         ('grip', 'left', 'ready'), ('detach', 'left', ''),
         ('preplace', 'left', ''), ('move', 'left', 'ready'),
