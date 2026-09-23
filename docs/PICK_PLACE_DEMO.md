@@ -100,7 +100,7 @@ ros2 launch fr3_dual_arm_grasp grasp.launch.py enable_execution:=false
 
 ### 展示方式和相机位置
 
-展示位置取在头部相机光轴前方 `display_distance_m`（默认 0.30 m，位于可达的正对窗口 0.12–0.36 m 内），姿态用 `display_pose_joints_deg`（默认 `[-109, -137, -107, -28, 94, 18]` 度）的侧向朝向，参考关节角只作 IK 种子、不要求精确匹配。展示序列为：绕零件自身 Z 轴用一次关节空间动作转 180°（`display_turn_direction` 选方向，默认 −1；这个距离下连续笛卡尔滚转不可行，只转 0.2% 就停），再绕零件 X 轴 ±30°（`display_x_tilts_deg`，先转出去再回原位、零件中心保持不动），最后把零件 +Z 轴直接转到正对相机，让底部完全朝向相机。左右手都做同一套展示，左手用右手关于 X-Z 平面的镜像姿态；左手底部视角会在 45° 逐档的 roll 里选第一个有解的。
+展示位置取在头部相机光轴前方 `display_distance_m`（默认 0.30 m，位于可达的正对窗口 0.12–0.36 m 内），姿态用 `display_pose_joints_deg`（默认 `[-109, -137, -107, -28, 94, 18]` 度）的侧向朝向，参考关节角只作 IK 种子、不要求精确匹配。展示序列为：让**关节 6 直接转 180°**（`display_turn_direction` 选方向，默认 −1；这就是零件绕自身轴的滚转，一次关节动作完成，不再走会失败的笛卡尔路径），再绕零件 X 轴 ±30°（`display_x_tilts_deg`，先转出去再回原位、零件中心保持不动），最后把零件 +Z 轴直接转到正对相机，让底部完全朝向相机。左右手都做同一套展示，左手用右手关于 X-Z 平面的镜像姿态；左手底部视角会在 45° 逐档的 roll 里选第一个有解的。
 
 先用关节空间到达展示位，再用一次关节空间动作完成 Z 180° 旋转；X ±30° 和底部视角也用关节空间（带参考种子）。任一视角 IK 无解时会暂停并提示，可点“跳过本步”继续下一个视角。UI 的 MoveL 使用笛卡尔路径，TCP 自由路径使用 IK/OMPL。
 
@@ -190,7 +190,7 @@ workpiece:
 | 7 | `grasp right right_grasp` | 右夹爪闭合至两爪间只剩 15 mm（`grasp_gap_m`），读取主指反馈换算总开度；连续 5 次变化不超过 0.5 mm 且落在配置范围才认为成功。 |
 | 8 | `attach right` | 软件状态把零件持有者记录为右手，并保存 TCP 到零件的相对变换。默认不向 RViz 发布零件碰撞体。 |
 | 9 | `lift right right_pregrasp` | 右手带件抬升回 `right_pregrasp`（关节空间），形成可控抬升。 |
-| 10 | `scan right right_display` | 右手先到光轴前方 0.30 m 的展示位，再绕零件 Z 轴一次转 180°，绕 X 轴 ±30°，最后把零件 +Z 轴直接正对相机展示底部。 |
+| 10 | `scan right right_display` | 右手先到光轴前方 0.30 m 的展示位，再让关节 6 转 -180°，绕 X 轴 ±30°，最后把零件 +Z 轴直接正对相机展示底部。 |
 | 11 | `move both handover_ready` | 右手先到交接预备位、再左手依次到达（不一起动）；右手停在 -Y 侧、左手停在 +Y 侧，两夹爪 Z 轴共线沿 world Y 对指，且绕 Z 轴相差 90°，两臂不交叉、手指不相撞。 |
 | 12 | `touch left` | 若启用零件碰撞体，临时允许左右手指与零件接触；默认隐藏零件时仅更新流程接触状态。 |
 | 13 | `receive left left_receive` | 左手从预备位伸进到 `handover_grip_separation_m`（默认 20 mm）的零件尺寸间隙，并读取右手实时 TCP 自动修正中心线。修正目标通过左臂 IK、OMPL 和碰撞检测后执行，右臂保持不动。 |
@@ -200,7 +200,7 @@ workpiece:
 | 17 | `retreat right` | 右手沿自身 TCP 负 Z 方向直线撤离 `retreat_distance_m`，避免撤离时扫过左夹爪。 |
 | 18 | `touch_only left` | 接触状态收紧为只允许左手持有零件。 |
 | 19 | `move right ready` | 右臂用 OMPL 回到安全就绪位，左手继续持件。 |
-| 20 | `scan left right_display` | 左手持件后做与右手镜像的展示：Z 轴转 180°、X 轴 ±30°、底部正对相机（底部视角会按 45° 逐档换 roll 直到有解）。 |
+| 20 | `scan left right_display` | 左手持件后做与右手镜像的展示：关节 6 转 -180°、X 轴 ±30°、底部正对相机（底部视角会按 45° 逐档换 roll 直到有解）。 |
 | 21 | `preplace left` | 从 `left_place` 沿 world +Z 增加 `place_clearance_m` 得到放置上方点，使用 OMPL 到达。 |
 | 22 | `place left` | 左手从上方点直线 MoveL 下降到示教的放置位。 |
 | 23 | `grip left ready` | 左夹爪自动张开到 `ready` 开度，放下零件；此处已按要求取消人工确认。 |

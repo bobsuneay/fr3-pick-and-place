@@ -500,17 +500,16 @@ class DemoApp(Node):
         z_axis = neutral[:3, 2]
         x_axis = neutral[:3, 0]
 
-        # 1) Turn the part 180 degrees about its own Z axis in one motion.
-        # A continuous Cartesian roll is not feasible this close to the camera
-        # (the wrist hits its limit after a fraction of a degree), so resolve
-        # the whole turn with one IK/OMPL move to the opposite orientation.
+        # 1) Roll the wrist: turn joint 6 by 180 degrees in one joint move.
+        # This is exactly the part rotating about its own axis, without relying
+        # on a fragile Cartesian roll this close to the camera.
         self.motion.guard(True)
         turn = int(round(self.display_turn_direction * 180.0))
-        self.publish(f'{side} 展示：绕零件 Z 轴一次转 {turn}°')
-        target = neutral.copy()
-        target[:3, :3] = (Rotation.from_rotvec(z_axis * math.radians(turn)).as_matrix()
-                          @ neutral[:3, :3])
-        self.motion.pose(side, vector(target @ np.linalg.inv(offset)), execute=True, seed=seed)
+        self.publish(f'{side} 展示：关节6转 {turn}°')
+        current = self.motion.guard()
+        targets = {f'{side}_j{i}': float(current[f'{side}_j{i}']) for i in range(1, 7)}
+        targets[f'{side}_j6'] = targets[f'{side}_j6'] + math.radians(turn)
+        self.motion.joints(targets, side + '_arm', execute=True)
         if self.stop_event.wait(self.dwell):
             raise RuntimeError('展示已停止')
 
