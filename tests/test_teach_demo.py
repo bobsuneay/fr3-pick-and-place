@@ -178,6 +178,10 @@ class FakeApp:
     def publish(self, text):
         pass
 
+    def _wait_skip_or_stop(self, label, error):
+        # Offline tests treat a failure as a stop; the GUI can instead skip.
+        raise RuntimeError(str(error))
+
 
 def test_recipe_releases_donor_only_after_automatic_receiver_grasp_and_transfer():
     app = FakeApp()

@@ -167,6 +167,8 @@ class TeachUI:
         self.button(actions, '检查示教点完整性', lambda: self.submit('检查示教点', self.app.book.validate_complete))
         self.button(actions, '运行完整 DEMO', lambda: self.submit('启动完整 demo', self.app.start_demo))
         tk.Button(actions, text='停止流程 / 取消运动', bg='#ba2832', fg='white', command=self.app.motion.cancel).pack(side='left', padx=8)
+        tk.Button(actions, text='跳过本步（IK 失败时）', bg='#d99a1c', fg='black',
+                  command=lambda: self.attempt(self.app.skip_step)).pack(side='left', padx=8)
         self.button(actions, '人工恢复后清除任务状态', self.recover)
         ttk.Label(self.root, text='软件停止不替代硬件急停。停止后保留夹爪；完整流程不会自动重启。预览只检查当前状态到选中目标的一段路径。', padding=6).pack(fill='x')
 

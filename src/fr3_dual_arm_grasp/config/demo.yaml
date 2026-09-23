@@ -1,6 +1,16 @@
 # Commission locally; never use guessed robot positions for real execution.
 scene_and_object_verified: false
 display_dwell_seconds: 2.0
+# Distance from the head camera optical centre to the part during display.
+display_distance_m: 0.30
+# Reference right-arm posture (deg) for the camera display: the gripper faces
+# the head camera sideways and stays perpendicular to the optical axis.  Used
+# as the IK seed and neutral orientation; does not need to be exact.
+display_pose_joints_deg: [-109, -137, -107, -28, 94, 18]
+# Display turns the part about the head-camera optical axis in one direction.
+display_turn_step_deg: 15
+# 1 turns one way, -1 the other; pick the direction free of joint limits.
+display_turn_direction: 1
 handover_centerline_tolerance_m: 0.005
 handover_centerline_angle_deg: 5.0
 handover_center_xyz: [0.35, 0.0, 1.00]

@@ -3,30 +3,21 @@ import math
 import numpy as np
 from scipy.spatial.transform import Rotation, Slerp
 
-# The part is an upright cylinder, so rotating about its own Z axis changes
-# nothing in the camera.  The meaningful views tilt the object about its
-# transverse X/Y axes to reveal the end faces and the curved side.  Avoid the
-# exact +/-90 and +/-180 degree singularities and keep each step a small,
-# reliably reachable fixed-axis rotation.
-_DISPLAY_TILTS = (60, -60, 120)
-_DISPLAY_YS = (60, -60)
-VIEWS = ([[0, 0, 0]] +
-         [[angle, 0, 0] for angle in _DISPLAY_TILTS] +
-         [[0, angle, 0] for angle in _DISPLAY_YS])
-
-
-def display_views(side):
-    """Return a short, IK-friendly inspection sequence for one arm.
-
-    The neutral pose is implicit: the caller presents each view and returns to
-    neutral afterwards, so every non-zero view is reached from the same stable
-    neutral solution rather than from the previous tilted configuration.
-    """
+# The part is an upright cylinder held so its axis is perpendicular to the
+# head-camera optical axis.  Rotating the part about that optical axis in a
+# single direction reveals the full curved side without reversing the wrist.
+def display_views(side, step_deg=15):
+    """Return one-direction rotation angles about the head-camera optical axis."""
     if side not in ('left', 'right'):
         raise ValueError('Display side must be left or right')
-    sign = 1 if side == 'right' else -1
-    return ([[sign * angle, 0, 0] for angle in _DISPLAY_TILTS] +
-            [[0, sign * angle, 0] for angle in _DISPLAY_YS])
+    step = int(step_deg)
+    if step < 1:
+        step = 15
+    return [angle for angle in range(step, 360, step)] + [360]
+
+
+# Compatibility export; the application computes the turn from display_views.
+VIEWS = display_views('right')
 
 
 def matrix(pose):

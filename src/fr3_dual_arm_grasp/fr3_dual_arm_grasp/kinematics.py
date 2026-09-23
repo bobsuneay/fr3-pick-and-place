@@ -66,17 +66,33 @@ class ArmChain:
         return transform
 
     def solve_ik(self, target, seed, max_iter=250, position_tol=1e-3,
-                 orientation_tol=math.radians(0.5)):
+                 orientation_tol=math.radians(0.5), restarts=8):
         """Damped least-squares IK for a 4x4 world-frame TCP target.
 
         Returns ``(joints, error)`` where ``error`` is ``(position_m,
         orientation_rad)`` on success, or ``(None, None)`` when the solver does
-        not converge.  Joints are clipped to the URDF limits with a small margin.
+        not converge.  Joints are clipped to the URDF limits with a small
+        margin.  A few deterministic random restarts escape local minima.
         """
         target = np.asarray(target, dtype=float)
         seed = np.asarray(seed, dtype=float)
         if target.shape != (4, 4) or seed.shape != (6,):
             raise ValueError('target must be 4x4 and seed a six-vector')
+        solution = self._solve_once(target, seed, max_iter, position_tol, orientation_tol)
+        if solution[0] is not None or restarts <= 0:
+            return solution
+        rng = np.random.default_rng(0)
+        lower = self.lower + 1e-3
+        upper = self.upper - 1e-3
+        for _ in range(restarts):
+            candidate = lower + rng.uniform(0.0, 1.0, 6) * (upper - lower)
+            solution = self._solve_once(
+                target, candidate, max_iter, position_tol, orientation_tol)
+            if solution[0] is not None:
+                return solution
+        return None, None
+
+    def _solve_once(self, target, seed, max_iter, position_tol, orientation_tol):
         margin = 1e-3
         lower = self.lower + margin
         upper = self.upper - margin

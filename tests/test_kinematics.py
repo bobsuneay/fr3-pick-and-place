@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / 'src/fr3_dual_arm_grasp'))
 from fr3_dual_arm_description.model import build_model, read_yaml
 from fr3_dual_arm_grasp.kinematics import (
     build_kinematics, matrix_to_pose, pose_to_matrix)
-from fr3_dual_arm_grasp.display_geometry import camera_neutral, display_views
+from fr3_dual_arm_grasp.display_geometry import display_views
 
 
 REFERENCE_TCP = {
@@ -42,25 +42,23 @@ def test_forward_kinematics_matches_urdf_convention(kinematics):
         np.testing.assert_allclose(pose, expected, atol=1e-12)
 
 
-def test_display_views_are_sequentially_reachable(kinematics):
+def test_display_turn_is_reachable(kinematics):
     chains, arms = kinematics
     share = ROOT / 'src/fr3_dual_arm_description'
     scene = read_yaml(share / 'config/scene.yaml')
     camera = scene['camera']
-    # A representative taught grasp: above the right-arm plane, TCP Z down.
-    taught = pose_to_matrix(
-        [0.45, -0.1, 0.82] + Rotation.from_euler('xyz', [math.pi, 0, 0]).as_quat().tolist())
-    neutral = camera_neutral(camera, matrix_to_pose(taught), np.eye(4), distance=0.30)
+    seed = [math.radians(v) for v in (-109, -137, -107, -28, 94, 18)]
+    tcp = chains['right'].fk(seed)
+    neutral = tcp.copy()
+    turn_axis = neutral[:3, 2]
 
-    neutral_solution, neutral_error = chains['right'].solve_ik(
-        neutral, arms['right']['initial'])
-    assert neutral_solution is not None
-    assert neutral_error[0] < 0.005 and neutral_error[1] < math.radians(1.0)
+    joints = list(seed)
     views = display_views('right')
-    for angles in views:
+    for angle in views:
         target = neutral.copy()
-        target[:3, :3] = neutral[:3, :3] @ Rotation.from_euler(
-            'xyz', angles, degrees=True).as_matrix()
-        solution, error = chains['right'].solve_ik(target, neutral_solution)
-        assert solution is not None, f'view {angles} is not reachable'
+        target[:3, :3] = (Rotation.from_rotvec(turn_axis * math.radians(angle)).as_matrix()
+                          @ neutral[:3, :3])
+        solution, error = chains['right'].solve_ik(target, joints)
+        assert solution is not None, f'display angle {angle} is not reachable'
         assert error[0] < 0.005 and error[1] < math.radians(1.0)
+        joints = solution

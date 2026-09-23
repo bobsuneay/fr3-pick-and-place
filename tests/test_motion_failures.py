@@ -189,7 +189,7 @@ def test_free_pose_uses_ik_joint_planning(motion, execute):
     target = [0.4, 0.1, 0.8, 0.0, 0.0, 0.0, 1.0]
     solution = {'right_j1': 0.1}
     calls = []
-    def ik(side, values):
+    def ik(side, values, seed=None):
         assert side == 'right' and values == target
         return solution
     motion._ik_joints = ik

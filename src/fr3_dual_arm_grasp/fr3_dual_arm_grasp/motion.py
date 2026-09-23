@@ -298,7 +298,7 @@ class DualArmMoveIt:
             raise RuntimeError(f'FK failed for {side}')
         return pose_values(result.pose_stamped[0].pose)
 
-    def _numeric_ik_joints(self, side, values):
+    def _numeric_ik_joints(self, side, values, seed=None):
         """Robust numeric IK fallback; returns a joint dict or ``None``."""
         chain = getattr(self, 'kinematics', {}).get(side)
         if chain is None:
@@ -306,7 +306,10 @@ class DualArmMoveIt:
         from fr3_dual_arm_grasp.kinematics import pose_to_matrix
         target = pose_to_matrix(values)
         current = self.guard()
-        seeds = [[current[f'{side}_j{i}'] for i in range(1, 7)]]
+        seeds = []
+        if seed is not None:
+            seeds.append([float(x) for x in seed])
+        seeds.append([current[f'{side}_j{i}'] for i in range(1, 7)])
         taught = getattr(self, 'seed_joints', {}).get(side)
         if taught is not None:
             seeds.append(taught)
@@ -323,8 +326,8 @@ class DualArmMoveIt:
                 return {f'{side}_j{i}': float(solution[i - 1]) for i in range(1, 7)}
         return None
 
-    def _ik_joints(self, side, values):
-        numeric = self._numeric_ik_joints(side, values)
+    def _ik_joints(self, side, values, seed=None):
+        numeric = self._numeric_ik_joints(side, values, seed=seed)
         if numeric is not None:
             try:
                 self.check_state(numeric)
@@ -345,13 +348,13 @@ class DualArmMoveIt:
         joints = dict(zip(result.solution.joint_state.name, result.solution.joint_state.position))
         return {f'{side}_j{i}': joints[f'{side}_j{i}'] for i in range(1, 7)}
 
-    def pose(self, side, values, execute=False, linear=False):
+    def pose(self, side, values, execute=False, linear=False, seed=None):
         if linear:
             return self.linear(side, values, execute)
         # Resolve the TCP target with MoveIt's dedicated IK service first.
         # The resulting joint target is then planned through OMPL, so collision
         # checking remains active and IK failures are reported separately.
-        return self.joints(self._ik_joints(side, values), side + '_arm', execute)
+        return self.joints(self._ik_joints(side, values, seed=seed), side + '_arm', execute)
 
     def show(self, state, trajectory):
         msg = DisplayTrajectory()

@@ -185,7 +185,8 @@ def recipe():
     return [
         ('move', 'both', 'ready'),
         ('grip', 'right', 'right_pregrasp'), ('grip', 'left', 'ready'),
-        ('move', 'right', 'right_pregrasp'), ('approach', 'right', 'right_grasp'),
+        ('move', 'right', 'right_pregrasp'), ('orient', 'right', 'right_orient'),
+        ('approach', 'right', 'right_grasp'),
         ('grasp', 'right', 'right_grasp'),
         ('attach', 'right', ''), ('lift', 'right', 'right_pregrasp'),
         ('scan', 'right', 'right_display'),

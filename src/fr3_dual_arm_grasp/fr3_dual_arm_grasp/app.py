@@ -116,6 +116,16 @@ class DemoApp(Node):
         self.display_distance = float(config.get('display_distance_m', 0.30))
         if not 0.1 <= self.display_distance <= 1.0:
             raise ValueError('Display distance must be 0.1..1.0 m')
+        self.display_pose_joints_deg = config.get('display_pose_joints_deg')
+        if self.display_pose_joints_deg is not None:
+            self.display_pose_joints_deg = finite_vector(
+                self.display_pose_joints_deg, 6, 'display_pose_joints_deg')
+        self.display_turn_step_deg = float(config.get('display_turn_step_deg', 15.0))
+        if not 1.0 <= self.display_turn_step_deg <= 45.0:
+            raise ValueError('Display turn step must be 1..45 deg')
+        self.display_turn_direction = 1 if config.get('display_turn_direction', 1) >= 0 else -1
+        self.skip_event = threading.Event()
+        self.awaiting_skip = False
         self.retreat_distance = float(config.get('retreat_distance_m', 0.06))
         self.place_clearance = float(config.get('place_clearance_m', 0.08))
         if not all(math.isfinite(x) and 0.01 <= x <= 0.3 for x in (self.retreat_distance, self.place_clearance)):
@@ -142,7 +152,7 @@ class DemoApp(Node):
         # Incoming messages are candidates only; they cannot start a motion.
         self.create_subscription(PoseStamped, '/grasp/perception/grasp_tcp', self.on_candidate, 10)
         for name, callback in [('start', self.start_service), ('stop', self.stop_service),
-                               ('status', self.status_service)]:
+                               ('skip', self.skip_service), ('status', self.status_service)]:
             self.create_service(Trigger, '/grasp/' + name, callback)
         self.create_timer(0.5, lambda: self.status_pub.publish(String(data=self.status_json())))
 
@@ -265,7 +275,29 @@ class DemoApp(Node):
                                execution_enabled=self.motion.enabled,
                                owner=self.scene.owner, recovery_required=self.recovery_required,
                                motion_fault=self.motion.fault,
+                               awaiting_skip=self.awaiting_skip,
                                keypoint_motion_mode=self.keypoint_motion_mode), ensure_ascii=False)
+
+    def skip_step(self):
+        """Signal the running workflow to skip the step that just failed."""
+        if not self.busy:
+            raise RuntimeError('当前没有正在运行的流程')
+        self.skip_event.set()
+        self.publish('已请求跳过当前失败步骤')
+
+    def _wait_skip_or_stop(self, label, error):
+        """Block the worker until the operator skips or stops after a failure."""
+        self.awaiting_skip = True
+        self.publish(f'{label} 失败：{error}')
+        self.publish('等待操作：点“跳过本步”继续，或“停止流程”结束')
+        self.skip_event.clear()
+        try:
+            while not self.skip_event.wait(0.1):
+                if self.stop_event.is_set():
+                    raise RuntimeError('Cancelled; gripper ownership retained')
+            self.publish('已跳过当前失败步骤，继续')
+        finally:
+            self.awaiting_skip = False
 
     def submit(self, label, function):
         if not self.operation_lock.acquire(blocking=False):
@@ -318,16 +350,12 @@ class DemoApp(Node):
 
     def generated_targets(self, name):
         pre = self.book.points['right_pregrasp']['right']['tcp']
-        if name == 'right_grasp':
+        if name in ('right_orient', 'right_grasp'):
             target = matrix(pre)
-            target[0, 3], target[1, 3] = pre[0], pre[1]
-            target[2, 3] = float(self.scene.scene['table']['top_z']) + 0.015
+            if name == 'right_grasp':
+                target[2, 3] = float(self.scene.scene['table']['top_z']) + 0.015
             # Keep the taught yaw/roll, but force TCP Z vertically downward.
-            z_axis = np.array([0.0, 0.0, -1.0])
-            x_axis = target[:3, 0] - np.dot(target[:3, 0], z_axis) * z_axis
-            x_axis /= np.linalg.norm(x_axis)
-            y_axis = np.cross(z_axis, x_axis)
-            target[:3, :3] = np.column_stack((x_axis, y_axis, z_axis))
+            self._force_tcp_down(target)
             return self._generated_point(vector(target), 0.0)
         if name == 'handover_ready':
             center = np.asarray(self.demo_config.get('handover_center_xyz', [0.35, 0.0, 1.0]), dtype=float)
@@ -347,6 +375,21 @@ class DemoApp(Node):
             }
         raise ValueError('Unknown generated target: ' + name)
 
+    @staticmethod
+    def _force_tcp_down(target):
+        # Force the TCP +Z axis to point along world -Z (vertical down) while
+        # keeping the taught X direction projected into the horizontal plane.
+        z_axis = np.array([0.0, 0.0, -1.0])
+        x_axis = target[:3, 0] - np.dot(target[:3, 0], z_axis) * z_axis
+        norm = np.linalg.norm(x_axis)
+        if norm < 1e-9:
+            x_axis = np.array([1.0, 0.0, 0.0])
+        else:
+            x_axis /= norm
+        y_axis = np.cross(z_axis, x_axis)
+        target[:3, :3] = np.column_stack((x_axis, y_axis, z_axis))
+        return target
+
     def grasp_target(self):
         return self.generated_targets('right_grasp')['right']['tcp']
 
@@ -356,9 +399,11 @@ class DemoApp(Node):
             if side == 'both':
                 raise ValueError('展示中心由单臂占用，请选择左手或右手')
             return self.move_display_neutral(side, execute)
-        if name in ('right_grasp', 'handover_ready'):
+        if name in ('right_orient', 'right_grasp', 'handover_ready'):
             generated = self.generated_targets(name)
-            if name == 'right_grasp':
+            if name in ('right_orient', 'right_grasp'):
+                # Orient in joint space, descend straight with MoveL; a pure
+                # vertical translation completes the Cartesian path reliably.
                 return self.motion.pose('right', generated['right']['tcp'], execute, linear=linear)
             return self.motion.poses(
                 {s: generated[s]['tcp'] for s in SIDES}, 'both_arms', execute)
@@ -383,32 +428,45 @@ class DemoApp(Node):
             raise RuntimeError('左手展示仅能在交接完成后进行')
         return matrix(self.scene.offset)
 
+    def _display_seed(self, side):
+        if side == 'right' and self.display_pose_joints_deg is not None:
+            return [math.radians(value) for value in self.display_pose_joints_deg]
+        return None
+
     def display_neutral(self):
-        # The stored measured joints/TCP remain unchanged; derive targets at use time.
-        return camera_neutral(self.scene.scene['camera'],
-            self.book.points['right_pregrasp']['right']['tcp'], matrix(self.scene.offset),
-            distance=self.display_distance)
+        seed = self._display_seed('right')
+        if seed is not None and 'right' in self.kinematics:
+            tcp = self.kinematics['right'].fk(seed)
+            return tcp @ matrix(self.scene.offset)
+        taught = matrix(self.book.points['right_pregrasp']['right']['tcp'])
+        return taught @ matrix(self.scene.offset)
 
     def move_display_neutral(self, side, execute=False):
+        if side == 'right' and self.display_pose_joints_deg is not None:
+            targets = {f'right_j{i}': math.radians(value)
+                       for i, value in enumerate(self.display_pose_joints_deg, 1)}
+            return self.motion.joints(targets, 'right_arm', execute)
         target = vector(self.display_neutral() @ np.linalg.inv(self.tcp_object(side)))
-        return self.motion.pose(side, target, execute=execute)
+        return self.motion.pose(side, target, execute=execute, seed=self._display_seed(side))
 
     def scan_display(self, side):
         neutral, offset = self.display_neutral(), self.tcp_object(side)
         self.move_display_neutral(side, True)
-        views = display_views(side)
-        for index, angles in enumerate(views, 1):
+        # Rotate the part about its own Z axis (the cylinder axis) so the full
+        # circumference faces the head camera, in one direction only.
+        turn_axis = neutral[:3, 2]
+        seed = self._display_seed(side)
+        angles = display_views(side, self.display_turn_step_deg)
+        for index, raw_angle in enumerate(angles, 1):
+            angle = self.display_turn_direction * raw_angle
             self.motion.guard(True)
-            self.publish(f'{side} 展示 {index}/{len(views)}，零件 RPY {angles}°')
+            self.publish(f'{side} 展示 {index}/{len(angles)}，绕零件 Z 轴 {angle}°')
             target = neutral.copy()
-            target[:3, :3] = (neutral[:3, :3] @
-                              Rotation.from_euler('xyz', angles, degrees=True).as_matrix())
-            self.motion.pose(side, vector(target @ np.linalg.inv(offset)), execute=True)
+            target[:3, :3] = (Rotation.from_rotvec(turn_axis * math.radians(angle)).as_matrix()
+                              @ neutral[:3, :3])
+            self.motion.pose(side, vector(target @ np.linalg.inv(offset)), execute=True, seed=seed)
             if self.stop_event.wait(self.dwell):
                 raise RuntimeError('展示已停止')
-            # Return to neutral so every view starts from the same stable
-            # configuration and wrist turns never accumulate.
-            self.motion.pose(side, vector(neutral @ np.linalg.inv(offset)), execute=True)
 
     def retreat_donor(self):
         tcp = matrix(self.motion.tcp_poses()['right'])
@@ -539,6 +597,14 @@ class DemoApp(Node):
     def stop_service(self, request, response):
         self.motion.cancel()
         response.success, response.message = True, 'Cancel requested; wait for terminal status; grippers retained'
+        return response
+
+    def skip_service(self, request, response):
+        try:
+            self.skip_step()
+            response.success, response.message = True, 'Skip requested'
+        except Exception as exc:
+            response.success, response.message = False, str(exc)
         return response
 
     def status_service(self, request, response):
