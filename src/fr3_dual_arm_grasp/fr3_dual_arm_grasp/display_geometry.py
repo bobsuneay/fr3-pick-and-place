@@ -3,18 +3,16 @@ import math
 import numpy as np
 from scipy.spatial.transform import Rotation, Slerp
 
-# Inspection angles are generated per arm because the two arms have mirrored
-# joint limits.  Z rotates in one direction only; X reverses for the left arm.
-_DISPLAY_ANGLES = (15, 60, 120, 180)
-VIEWS = [[0, 0, 0]] + [[angle, 0, 0] for angle in _DISPLAY_ANGLES] + [[0, 0, angle] for angle in _DISPLAY_ANGLES]
-
-
 def display_views(side, z_sign=1):
-    """Return IK-friendly one-way X/Z inspection poses for one arm."""
-    x_sign = 1 if side == 'right' else -1
+    """Rotate about the +45-degree presentation baseline, without an extra X flip."""
+    if side not in ('left', 'right'):
+        raise ValueError('Display side must be left or right')
     z_sign = 1 if z_sign >= 0 else -1
-    return ([[0, 0, 0], [-90, 0, 0]] +
-            [[0, 0, z_sign * angle] for angle in range(15, 361, 15)])
+    return [[0, 0, z_sign * angle] for angle in range(0, 361, 15)]
+
+
+# Compatibility export; the application and tests use display_views directly.
+VIEWS = display_views('right')
 
 
 def matrix(pose):

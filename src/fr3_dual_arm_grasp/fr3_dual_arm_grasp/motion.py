@@ -295,6 +295,8 @@ class DualArmMoveIt:
         return {f'{side}_j{i}': joints[f'{side}_j{i}'] for i in range(1, 7)}
 
     def pose(self, side, values, execute=False, linear=False):
+        if linear:
+            return self.linear(side, values, execute)
         # Resolve the TCP target with MoveIt's dedicated IK service first.
         # The resulting joint target is then planned through OMPL, so collision
         # checking remains active and IK failures are reported separately.

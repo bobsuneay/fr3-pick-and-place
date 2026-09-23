@@ -386,26 +386,30 @@ class DemoApp(Node):
             z_sign = int(self.demo_config.get('display_z_direction', 1))
             views = display_views(side, z_sign)
             execute = True
+        previous = neutral
         for index, angles in enumerate(views, 1):
-            self.motion.guard(True)
-            self.publish(f'{side} 展示 {index}/{len(views)}，零件 RPY {angles}°')
-            # X=-90 relative to neutral gives the absolute Rx=-180 pose.
-            if angles[2]:
-                target = neutral.copy()
-                target[:3, :3] = neutral[:3, :3] @ Rotation.from_euler('z', angles[2], degrees=True).as_matrix()
-            else:
-                target = neutral.copy()
-                target[:3, :3] = neutral[:3, :3] @ Rotation.from_euler('x', angles[0], degrees=True).as_matrix()
-            if any(angles):
-                self.motion.pose(side, vector(target @ np.linalg.inv(offset)), execute)
+            self.motion.guard(execute)
+            self.publish(f'{side} 展示 {index}/{len(views)}，相对展示基准 RPY {angles}°')
+            target = neutral.copy()
+            target[:3, :3] = neutral[:3, :3] @ Rotation.from_euler(
+                'xyz', angles, degrees=True).as_matrix()
+            if index > 1:
+                try:
+                    if execute:
+                        # Interpolate the object centre between adjacent views;
+                        # never replace a failed inspection path with an OMPL detour.
+                        self.motion.cartesian(side, object_path(previous, target, offset), True)
+                    else:
+                        # Preview targets independently: the robot has not moved
+                        # to the previous preview's endpoint.
+                        self.motion.pose(side, vector(target @ np.linalg.inv(offset)), False)
+                except RuntimeError as exc:
+                    raise RuntimeError(
+                        f'{side} 展示 {index}/{len(views)}，相对展示基准 RPY {angles}°失败：{exc}'
+                    ) from exc
+            previous = target
             if execute and self.stop_event.wait(self.dwell):
                 raise RuntimeError('展示已停止')
-            if any(angles):
-                # The X presentation intentionally ends at Rx=-180°; do not
-                # use Cartesian interpolation near this wrist turn.
-                if angles[0] == -90:
-                    self.motion.pose(side, vector(neutral @ np.linalg.inv(offset)), execute)
-                    continue
 
     def retreat_donor(self):
         tcp = matrix(self.motion.tcp_poses()['right'])

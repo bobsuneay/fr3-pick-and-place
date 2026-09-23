@@ -168,3 +168,32 @@ def test_both_tcp_targets_form_one_both_arms_goal(motion, monkeypatch, execute):
     assert len(constraints.joint_constraints) == 12
     assert {item.joint_name: item.position for item in constraints.joint_constraints} == expected
     assert verified == ([expected] if execute else [])
+
+
+@pytest.mark.parametrize('execute', [False, True])
+def test_linear_pose_uses_cartesian_path_without_ik(motion, execute):
+    calls = []
+    target = [0.4, 0.1, 0.8, 0.0, 0.0, 0.0, 1.0]
+    sentinel = object()
+    def cartesian(side, waypoints, requested_execution):
+        calls.append((side, waypoints, requested_execution))
+        return sentinel
+    motion.cartesian = cartesian
+    motion._ik_joints = lambda *args: pytest.fail('MoveL must not use free-path IK')
+    assert motion.pose('right', target, execute, linear=True) is sentinel
+    assert calls == [('right', [target], execute)]
+
+
+@pytest.mark.parametrize('execute', [False, True])
+def test_free_pose_uses_ik_joint_planning(motion, execute):
+    target = [0.4, 0.1, 0.8, 0.0, 0.0, 0.0, 1.0]
+    solution = {'right_j1': 0.1}
+    calls = []
+    def ik(side, values):
+        assert side == 'right' and values == target
+        return solution
+    motion._ik_joints = ik
+    motion.joints = lambda *args: calls.append(args)
+    motion.cartesian = lambda *args: pytest.fail('Free path must use joint planning')
+    motion.pose('right', target, execute)
+    assert calls == [(solution, 'right_arm', execute)]
