@@ -463,28 +463,34 @@ class DemoApp(Node):
         result[:3, 3] = np.asarray(camera['xyz'])
         return result
 
-    def display_neutral(self):
+    def display_neutral(self, side='right'):
         # Place the part centre on the head-camera optical axis at the
         # configured distance (within the reachable 0.12-0.36 m window for a
         # face-on view), keeping the reference posture's side-on orientation.
+        # The left hand mirrors the right about the X-Z plane.
         optical = self._camera_optical_transform()
         obj = np.eye(4)
         obj[:3, 3] = optical[:3, 3] + optical[:3, 2] * self.display_distance
         seed = self._display_seed('right')
         if seed is not None and 'right' in self.kinematics:
             tcp = self.kinematics['right'].fk(seed)
-            obj[:3, :3] = (tcp @ matrix(self.scene.offset))[:3, :3]
+            base = (tcp @ matrix(self.scene.offset))[:3, :3]
         else:
             taught = matrix(self.book.points['right_pregrasp']['right']['tcp'])
-            obj[:3, :3] = (taught @ matrix(self.scene.offset))[:3, :3]
+            base = (taught @ matrix(self.scene.offset))[:3, :3]
+        if side == 'left':
+            mirror = np.diag([1.0, -1.0, 1.0])
+            base = mirror @ base @ mirror
+            obj[:3, 3] = [obj[0, 3], -obj[1, 3], obj[2, 3]]
+        obj[:3, :3] = base
         return obj
 
     def move_display_neutral(self, side, execute=False):
-        target = vector(self.display_neutral() @ np.linalg.inv(self.tcp_object(side)))
+        target = vector(self.display_neutral(side) @ np.linalg.inv(self.tcp_object(side)))
         return self.motion.pose(side, target, execute=execute, seed=self._display_seed(side))
 
     def scan_display(self, side):
-        neutral, offset = self.display_neutral(), self.tcp_object(side)
+        neutral, offset = self.display_neutral(side), self.tcp_object(side)
         self.move_display_neutral(side, True)
         seed = self._display_seed(side)
         z_axis = neutral[:3, 2]
@@ -522,8 +528,24 @@ class DemoApp(Node):
         # 3) Show the part's bottom face toward the camera.
         self.motion.guard(True)
         self.publish(f'{side} 展示：零件底部朝向相机')
-        target = self._bottom_view(neutral)
-        self.motion.pose(side, vector(target @ np.linalg.inv(offset)), execute=True, seed=seed)
+        base = self._bottom_view(neutral)
+        axis = base[:3, 2]
+        settled = False
+        for roll in (0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0):
+            self.motion.guard(True)
+            target = base.copy()
+            target[:3, :3] = (Rotation.from_rotvec(axis * math.radians(roll)).as_matrix()
+                              @ base[:3, :3])
+            try:
+                # A failed IK raises before any motion is sent, so retrying a
+                # rolled target is safe (the mirrored left hand needs this).
+                self.motion.pose(side, vector(target @ np.linalg.inv(offset)), execute=True, seed=seed)
+            except RuntimeError:
+                continue
+            settled = True
+            break
+        if not settled:
+            raise RuntimeError('零件底部朝向相机无解')
         if self.stop_event.wait(self.dwell):
             raise RuntimeError('展示已停止')
 
@@ -581,12 +603,8 @@ class DemoApp(Node):
 
     def verify_grasp(self, side, timeout=3.0):
         """Accept a grasp only when the measured opening is stable and plausible."""
-        # Mock mode has no physical workpiece.  The simulated gripper therefore
-        # reaches the closed endpoint without producing a meaningful object
-        # width, so do not abort the demo on the real-hardware grasp check.
-        if self.mode == 'mock':
-            self.publish(f'{side} mock 夹取：跳过实际开度判定，继续 demo')
-            return 0.0
+        # The grippers close to a fixed part-sized gap (not fully closed), so
+        # the measured opening is meaningful in mock as well as real mode.
         joint = side + '_left_finger_joint'
         deadline = time.monotonic() + timeout
         stable = []

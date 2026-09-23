@@ -81,3 +81,46 @@ def test_handover_y_axis_is_reachable(kinematics):
     left[:3, 3] = center + axis * separation / 2.0
     assert chains['right'].solve_ik(right, arms['right']['initial'])[0] is not None
     assert chains['left'].solve_ik(left, arms['left']['initial'])[0] is not None
+
+
+def test_left_mirror_display_is_reachable(kinematics):
+    chains, arms = kinematics
+    share = ROOT / 'src/fr3_dual_arm_description'
+    scene = read_yaml(share / 'config/scene.yaml')
+    camera = scene['camera']
+    optical = (Rotation.from_euler('xyz', camera['rpy']) *
+               Rotation.from_euler('xyz', [-math.pi / 2, 0, -math.pi / 2]))
+    center = np.asarray(camera['xyz']) + optical.apply([0, 0, 0.30])
+    seed = [math.radians(v) for v in (-109, -137, -107, -28, 94, 18)]
+    right_tcp = chains['right'].fk(seed)
+    mirror = np.diag([1.0, -1.0, 1.0])
+    neutral = np.eye(4)
+    neutral[:3, 3] = center
+    neutral[:3, :3] = mirror @ right_tcp[:3, :3] @ mirror
+    z_axis = neutral[:3, 2]
+    x_axis = neutral[:3, 0]
+    joints = list(arms['left']['initial'])
+    maneuvers = [(z_axis, -180.0), (x_axis, 30.0), (x_axis, -30.0)]
+    for axis, angle in maneuvers:
+        target = neutral.copy()
+        target[:3, :3] = (Rotation.from_rotvec(np.asarray(axis) * math.radians(angle)).as_matrix()
+                          @ neutral[:3, :3])
+        solution, error = chains['left'].solve_ik(target, joints)
+        assert solution is not None, f'left display {angle} not reachable'
+        joints = solution
+    # Bottom facing the camera: at least one roll must be reachable.
+    to_camera = np.asarray(camera['xyz']) - neutral[:3, 3]
+    to_camera /= np.linalg.norm(to_camera)
+    reachable = False
+    for roll in range(0, 360, 45):
+        base = np.eye(4)
+        base[:3, 3] = neutral[:3, 3]
+        ref = np.array([0.0, 0.0, 1.0])
+        xx = ref - np.dot(ref, to_camera) * to_camera
+        xx = xx / np.linalg.norm(xx)
+        xx = Rotation.from_rotvec(to_camera * math.radians(roll)).as_matrix() @ xx
+        base[:3, :3] = np.column_stack((xx, np.cross(to_camera, xx), to_camera))
+        if chains['left'].solve_ik(base, joints)[0] is not None:
+            reachable = True
+            break
+    assert reachable, 'left bottom facing view not reachable at any roll'
