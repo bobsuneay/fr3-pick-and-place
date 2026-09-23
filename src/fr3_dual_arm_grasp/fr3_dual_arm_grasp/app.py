@@ -496,19 +496,19 @@ class DemoApp(Node):
         z_axis = neutral[:3, 2]
         x_axis = neutral[:3, 0]
 
-        # 1) One continuous 180-degree roll about the part's own Z axis.
+        # 1) Turn the part 180 degrees about its own Z axis in one motion.
+        # A continuous Cartesian roll is not feasible this close to the camera
+        # (the wrist hits its limit after a fraction of a degree), so resolve
+        # the whole turn with one IK/OMPL move to the opposite orientation.
         self.motion.guard(True)
         turn = int(round(self.display_turn_direction * 180.0))
-        self.publish(f'{side} 展示：绕零件 Z 轴连续转 {turn}°')
-        step = int(self.display_turn_step_deg)
-        angles = list(range(0, 180, step)) + [180]
-        waypoints = []
-        for raw in angles:
-            target = neutral.copy()
-            target[:3, :3] = (Rotation.from_rotvec(z_axis * math.radians(self.display_turn_direction * raw)).as_matrix()
-                              @ neutral[:3, :3])
-            waypoints.append(vector(target @ np.linalg.inv(offset)))
-        self.motion.cartesian(side, waypoints, execute=True)
+        self.publish(f'{side} 展示：绕零件 Z 轴一次转 {turn}°')
+        target = neutral.copy()
+        target[:3, :3] = (Rotation.from_rotvec(z_axis * math.radians(turn)).as_matrix()
+                          @ neutral[:3, :3])
+        self.motion.pose(side, vector(target @ np.linalg.inv(offset)), execute=True, seed=seed)
+        if self.stop_event.wait(self.dwell):
+            raise RuntimeError('展示已停止')
 
         # 2) Fixed tilts about the part's X axis.
         for tilt in self.display_x_tilts_deg:
