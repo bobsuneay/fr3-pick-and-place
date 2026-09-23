@@ -143,6 +143,13 @@ class DemoApp(Node):
         self.display_preset_deg = {
             side: float(value) for side, value in self.display_preset_deg.items()
             if side in ('left', 'right')}
+        self.display_bottom_sign = config.get('display_bottom_sign', {})
+        if not isinstance(self.display_bottom_sign, dict):
+            raise ValueError('display_bottom_sign must be a per-hand mapping')
+        self.display_bottom_sign = {
+            side: (1.0 if float(value) >= 0 else -1.0)
+            for side, value in self.display_bottom_sign.items()
+            if side in ('left', 'right')}
         self.grasp_clearance = float(config.get('grasp_clearance_m', 0.015))
         if not 0.001 <= self.grasp_clearance <= 0.10:
             raise ValueError('grasp_clearance_m must be 1..100 mm')
@@ -571,7 +578,9 @@ class DemoApp(Node):
             distance = self.display_distance + delta
             if distance < 0.10 or distance > 0.60:
                 continue
-            base = self._bottom_view(neutral, optical[:3, 3] + optical[:3, 2] * distance)
+            base = self._bottom_view(
+                neutral, optical[:3, 3] + optical[:3, 2] * distance,
+                self.display_bottom_sign.get(side, 1.0))
             axis = base[:3, 2]
             for roll in (0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0):
                 self.motion.guard(True)
@@ -594,15 +603,15 @@ class DemoApp(Node):
         if self.stop_event.wait(self.dwell):
             raise RuntimeError('展示已停止')
 
-    def _bottom_view(self, neutral, position=None):
-        """Point the part's +Z axis directly back toward the head camera."""
+    def _bottom_view(self, neutral, position=None, sign=1.0):
+        """Point the chosen end of the part directly back toward the camera."""
         optical = self._camera_optical_transform()
         position = neutral[:3, 3] if position is None else np.asarray(position, dtype=float)
         to_camera = optical[:3, 3] - position
         distance = float(np.linalg.norm(to_camera))
         if distance < 1e-9:
             return neutral
-        to_camera /= distance
+        to_camera = to_camera / distance * (1.0 if sign >= 0 else -1.0)
         from_axis = neutral[:3, 2] / np.linalg.norm(neutral[:3, 2])
         cross = np.cross(from_axis, to_camera)
         dot = float(np.dot(from_axis, to_camera))

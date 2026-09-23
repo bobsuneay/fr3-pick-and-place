@@ -18,6 +18,11 @@ display_x_tilts_deg: [30, -30]
 display_preset_deg:
   left: 90
   right: 0
+# Facing sign for the bottom view, per hand: +1 points the part's +Z at the
+# camera, -1 points the opposite end (flip) at it.
+display_bottom_sign:
+  left: -1
+  right: 1
 # Height of the grasp/place TCP above the table for the pickup and the drop.
 grasp_clearance_m: 0.015
 handover_centerline_tolerance_m: 0.010
