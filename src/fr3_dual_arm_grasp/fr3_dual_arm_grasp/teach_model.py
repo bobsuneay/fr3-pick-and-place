@@ -196,7 +196,7 @@ def recipe():
         ('retreat', 'right', ''), ('touch_only', 'left', ''),
         ('move', 'right', 'ready'),
         ('scan', 'left', 'right_display'),
-        ('preplace', 'left', ''), ('place', 'left', ''),
+        ('preplace', 'left', ''), ('orient', 'left', 'left_place'), ('place', 'left', ''),
         ('grip', 'left', 'ready'), ('detach', 'left', ''),
         ('preplace', 'left', ''), ('move', 'left', 'ready'),
     ]

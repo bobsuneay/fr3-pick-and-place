@@ -370,6 +370,13 @@ class DemoApp(Node):
             # Keep the taught yaw/roll, but force TCP Z vertically downward.
             self._force_tcp_down(target)
             return self._generated_point(vector(target), 0.0)
+        if name == 'left_place':
+            # Mirror of the right pickup: place at the taught x/y but a fixed
+            # 18 mm above the table with the gripper pointing straight down.
+            place = matrix(self.book.points['left_place']['left']['tcp'])
+            place[2, 3] = float(self.scene.scene['table']['top_z']) + 0.018
+            self._force_tcp_down(place)
+            return self._generated_point(vector(place), 0.0)
         if name == 'handover_ready':
             center = np.asarray(self.demo_config.get('handover_center_xyz', [0.35, 0.0, 1.0]), dtype=float)
             separation = float(self.demo_config.get('handover_separation_m', 0.16))
@@ -422,12 +429,15 @@ class DemoApp(Node):
             if side == 'both':
                 raise ValueError('展示中心由单臂占用，请选择左手或右手')
             return self.move_display_neutral(side, execute)
-        if name in ('right_orient', 'right_grasp', 'handover_ready'):
+        if name in ('right_orient', 'right_grasp', 'left_place', 'handover_ready'):
             generated = self.generated_targets(name)
             if name in ('right_orient', 'right_grasp'):
                 # Orient in joint space, descend straight with MoveL; a pure
                 # vertical translation completes the Cartesian path reliably.
                 return self.motion.pose('right', generated['right']['tcp'], execute, linear=linear)
+            if name == 'left_place':
+                # Left placement approach/orientation (mirror of the pickup).
+                return self.motion.pose('left', generated['left']['tcp'], execute)
             # Move the two hands one at a time so they never plan as a single
             # both_arms goal; the right hand goes first, then the left.
             self.motion.pose('right', generated['right']['tcp'], execute)
@@ -539,32 +549,43 @@ class DemoApp(Node):
         # 3) Show the part's bottom face toward the camera.
         self.motion.guard(True)
         self.publish(f'{side} 展示：零件底部朝向相机')
-        base = self._bottom_view(neutral)
-        axis = base[:3, 2]
+        optical = self._camera_optical_transform()
         settled = False
-        for roll in (0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0):
-            self.motion.guard(True)
-            target = base.copy()
-            target[:3, :3] = (Rotation.from_rotvec(axis * math.radians(roll)).as_matrix()
-                              @ base[:3, :3])
-            try:
-                # A failed IK raises before any motion is sent, so retrying a
-                # rolled target is safe (the mirrored left hand needs this).
-                self.motion.pose(side, vector(target @ np.linalg.inv(offset)), execute=True, seed=seed)
-            except RuntimeError:
+        # The wrist-up pose needed to face the camera sits close to the support
+        # on the left arm, so widen the distance and roll and use the first view
+        # whose IK (with collision checking) succeeds.
+        for delta in (0.0, -0.04, 0.04, -0.08, 0.08, -0.12, 0.12, -0.16, 0.16):
+            distance = self.display_distance + delta
+            if distance < 0.10 or distance > 0.60:
                 continue
-            settled = True
-            break
+            base = self._bottom_view(neutral, optical[:3, 3] + optical[:3, 2] * distance)
+            axis = base[:3, 2]
+            for roll in (0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0):
+                self.motion.guard(True)
+                target = base.copy()
+                target[:3, :3] = (Rotation.from_rotvec(axis * math.radians(roll)).as_matrix()
+                                  @ base[:3, :3])
+                try:
+                    # A failed IK raises before any motion is sent, so retrying
+                    # another distance/roll is safe.
+                    self.motion.pose(side, vector(target @ np.linalg.inv(offset)), execute=True, seed=seed)
+                except RuntimeError:
+                    continue
+                settled = True
+                break
+            if settled:
+                break
         if not settled:
             self.publish(f'{side} 展示：零件底部朝向相机无解，跳过该视角')
             return
         if self.stop_event.wait(self.dwell):
             raise RuntimeError('展示已停止')
 
-    def _bottom_view(self, neutral):
+    def _bottom_view(self, neutral, position=None):
         """Point the part's +Z axis directly back toward the head camera."""
         optical = self._camera_optical_transform()
-        to_camera = optical[:3, 3] - neutral[:3, 3]
+        position = neutral[:3, 3] if position is None else np.asarray(position, dtype=float)
+        to_camera = optical[:3, 3] - position
         distance = float(np.linalg.norm(to_camera))
         if distance < 1e-9:
             return neutral
@@ -581,6 +602,7 @@ class DemoApp(Node):
             angle = math.atan2(float(np.linalg.norm(cross)), dot)
             rotation = Rotation.from_rotvec(cross / np.linalg.norm(cross) * angle)
         target = neutral.copy()
+        target[:3, 3] = position
         target[:3, :3] = rotation.as_matrix() @ neutral[:3, :3]
         return target
 
@@ -590,13 +612,16 @@ class DemoApp(Node):
         self.motion.pose('right', vector(tcp), execute=True, linear=True)
 
     def place_move(self, above):
-        pose = list(self.book.points['left_place']['left']['tcp'])
+        # Place at the taught x/y but a fixed 18 mm above the table with the
+        # gripper vertical, mirroring the right pickup.
+        place = list(self.generated_targets('left_place')['left']['tcp'])
+        pose = list(place)
         pose[2] += self.place_clearance
         if above:
             # Before placement use global planning; after detach rise linearly.
             self.motion.pose('left', pose, True, linear=self.scene.owner is None)
         else:
-            self.motion.pose('left', self.book.points['left_place']['left']['tcp'], True, linear=True)
+            self.motion.pose('left', place, True, linear=True)
 
     def manual_joints(self, side, joints, execute):
         self.initialize_scene()

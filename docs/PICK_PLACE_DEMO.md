@@ -96,7 +96,7 @@ ros2 launch fr3_dual_arm_grasp grasp.launch.py enable_execution:=false
 
 展示点由头部相机光轴中心和 30 cm 距离自动生成；交接预备间距由 `handover_separation_m` 给出，左手接取时再从预备位伸进到 `handover_grip_separation_m`（默认 20 mm）的零件尺寸间隙，并根据右手实时 TCP 动态对齐。旧文件中的 `right_grasp`、`right_display`、`handover_ready`、`left_receive` 会被保留读取但不再要求重新采集。
 
-交接后右手沿自身 TCP 的负 Z 方向撤离 `retreat_distance_m`（默认 6 cm），再回到就绪点；放置前的位置由 `left_place` 沿 world +Z 加 `place_clearance_m`（默认 8 cm）生成，随后直线下降，放下后直线抬升。参数在 demo.yaml 中，方向必须符合现场夹持几何；路径不通会停止。夹爪不会跟随展示点开合：右手释放使用 right_pregrasp 的开度，左手张开/释放使用 ready 的开度。
+交接后右手沿自身 TCP 的负 Z 方向撤离 `retreat_distance_m`（默认 6 cm），再回到就绪点；放置点用 `left_place` 的 x/y，z 固定为桌面上方 18 mm 并把夹爪调竖直（镜像右手的取件动作），随后直线 MoveL 下降、放下后直线抬升。参数在 demo.yaml 中，方向必须符合现场夹持几何；路径不通会停止。夹爪不会跟随展示点开合：右手释放使用 right_pregrasp 的开度，左手张开/释放使用 ready 的开度。
 
 ### 展示方式和相机位置
 
@@ -175,7 +175,7 @@ workpiece:
 
 实际开度小于下限通常表示没有夹到零件而接近全闭；大于上限表示夹到错误位置或其他障碍。这个判断没有零件身份识别、触觉确认或掉落检测。
 
-### 6.2 完整 Demo 的 26 步
+### 6.2 完整 Demo 的 27 步
 
 每个运动步骤开始前都会检查停止请求、反馈新鲜度和当前机器人状态。普通远距离运动使用 MoveIt IK/OMPL；标记为 MoveL 的步骤使用 `/compute_cartesian_path`，要求路径覆盖率 100%，以 2 mm 步长进行碰撞检查，再交给 `/execute_trajectory`。夹爪通过 MoveIt `GripperCommand`、`ros2_control` 和法奥 `MoveGripper` 到达实机。
 
@@ -200,13 +200,14 @@ workpiece:
 | 17 | `retreat right` | 右手沿自身 TCP 负 Z 方向直线撤离 `retreat_distance_m`，避免撤离时扫过左夹爪。 |
 | 18 | `touch_only left` | 接触状态收紧为只允许左手持有零件。 |
 | 19 | `move right ready` | 右臂用 OMPL 回到安全就绪位，左手继续持件。 |
-| 20 | `scan left right_display` | 左手持件后做与右手同一零件姿态的展示：关节 6 转 -180°、X 轴 ±30°、底部正对相机（底部视角会按 45° 逐档换 roll 直到有解）。 |
-| 21 | `preplace left` | 从 `left_place` 沿 world +Z 增加 `place_clearance_m` 得到放置上方点，使用 OMPL 到达。 |
-| 22 | `place left` | 左手从上方点直线 MoveL 下降到示教的放置位。 |
-| 23 | `grip left ready` | 左夹爪自动张开到 `ready` 开度，放下零件；此处已按要求取消人工确认。 |
-| 24 | `detach left` | 软件清除左手持有者并记录零件最终世界位姿；默认不显示零件碰撞体。 |
-| 25 | `preplace left` | 左手从放置点沿 world +Z 直线抬升到安全高度。 |
-| 26 | `move left ready` | 左臂用 OMPL 回到 `ready`，清除恢复锁并报告完整流程完成。 |
+| 20 | `scan left right_display` | 左手持件后做与右手同一零件姿态的展示：关节 6 转 -180°、X 轴 ±30°、底部正对相机（底部视角会在若干距离和 45° 逐档 roll 里找第一个有解的，没有就自动跳过该视角）。 |
+| 21 | `preplace left` | 从放置点沿 world +Z 增加 `place_clearance_m` 得到放置上方点，使用 OMPL 到达。 |
+| 22 | `orient left left_place` | 左手在上方点用 OMPL 把夹爪姿态调整为竖直向下（镜像右手的取件动作）。 |
+| 23 | `place left` | 左手沿 TCP 直线 MoveL 竖直下降到桌面上方 18 mm 的放置点。 |
+| 24 | `grip left ready` | 左夹爪自动张开到 `ready` 开度，放下零件；此处已按要求取消人工确认。 |
+| 25 | `detach left` | 软件清除左手持有者并记录零件最终世界位姿；默认不显示零件碰撞体。 |
+| 26 | `preplace left` | 左手从放置点沿 world +Z 直线抬升到安全高度。 |
+| 27 | `move left ready` | 左臂用 OMPL 回到 `ready`，清除恢复锁并报告完整流程完成。 |
 
 任一步失败都会停止后续步骤。抓取后发生失败时不会自动张开当前持有零件的夹爪；交接步骤中，左手未通过中心线和开度检查时右手不会松开。
 
