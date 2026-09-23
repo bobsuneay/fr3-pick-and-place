@@ -471,7 +471,11 @@ class DemoApp(Node):
         # Place the part centre on the head-camera optical axis at the
         # configured distance (within the reachable 0.12-0.36 m window for a
         # face-on view), keeping the reference posture's side-on orientation.
-        # The left hand mirrors the right about the X-Z plane.
+        # Both hands present the same part pose; each TCP is then resolved with
+        # that hand's own grip.  Mirroring the object pose about the X-Z plane
+        # (the natural arm mirror) is out of the left arm's reachable set
+        # because the FR3 arms have asymmetric joint limits, so the left hand
+        # shows the same part pose instead.
         optical = self._camera_optical_transform()
         obj = np.eye(4)
         obj[:3, 3] = optical[:3, 3] + optical[:3, 2] * self.display_distance
@@ -482,10 +486,6 @@ class DemoApp(Node):
         else:
             taught = matrix(self.book.points['right_pregrasp']['right']['tcp'])
             base = (taught @ matrix(self.scene.offset))[:3, :3]
-        if side == 'left':
-            mirror = np.diag([1.0, -1.0, 1.0])
-            base = mirror @ base @ mirror
-            obj[:3, 3] = [obj[0, 3], -obj[1, 3], obj[2, 3]]
         obj[:3, :3] = base
         return obj
 

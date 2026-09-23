@@ -53,7 +53,8 @@ def test_display_turn_is_reachable(kinematics):
 
     joints = list(seed)
     # Z turn endpoint (direction -1, i.e. -180 degrees).
-    maneuvers = [(z_axis, -180.0, 'Z -180'), (x_axis, 30.0, 'X +30'), (x_axis, -30.0, 'X -30')]
+    # The Z roll is now a joint-6 move (no IK); only the IK targets are checked.
+    maneuvers = [(x_axis, 30.0, 'X +30'), (x_axis, -30.0, 'X -30')]
     for axis, angle, label in maneuvers:
         target = neutral.copy()
         target[:3, :3] = (Rotation.from_rotvec(np.asarray(axis) * math.radians(angle)).as_matrix()
@@ -83,7 +84,17 @@ def test_handover_y_axis_is_reachable(kinematics):
     assert chains['left'].solve_ik(left, arms['left']['initial'])[0] is not None
 
 
-def test_left_mirror_display_is_reachable(kinematics):
+def _pose(pos, z, y):
+    z = np.asarray(z, float); z = z / np.linalg.norm(z)
+    y = np.asarray(y, float); y = y - np.dot(y, z) * z
+    y = y / np.linalg.norm(y)
+    M = np.eye(4)
+    M[:3, :3] = np.column_stack((np.cross(y, z), y, z))
+    M[:3, 3] = pos
+    return M
+
+
+def test_left_same_object_display_is_reachable(kinematics):
     chains, arms = kinematics
     share = ROOT / 'src/fr3_dual_arm_description'
     scene = read_yaml(share / 'config/scene.yaml')
@@ -93,19 +104,26 @@ def test_left_mirror_display_is_reachable(kinematics):
     center = np.asarray(camera['xyz']) + optical.apply([0, 0, 0.30])
     seed = [math.radians(v) for v in (-109, -137, -107, -28, 94, 18)]
     right_tcp = chains['right'].fk(seed)
-    mirror = np.diag([1.0, -1.0, 1.0])
     neutral = np.eye(4)
     neutral[:3, 3] = center
-    neutral[:3, :3] = mirror @ right_tcp[:3, :3] @ mirror
+    # Same part pose as the right; the left resolves it with its own grip.
+    neutral[:3, :3] = right_tcp[:3, :3]
+    # Left grip transform from the handover (right -Y, left +Y, 20 mm grip gap).
+    axis = np.array([0.0, 1.0, 0.0])
+    hcenter = np.array([0.35, 0.0, 1.0])
+    right_h = _pose(hcenter - axis * 0.08, axis, np.array([0.0, 0.0, 1.0]))
+    left_h = _pose(hcenter - axis * 0.08 + axis * 0.02, -axis, np.array([1.0, 0.0, 0.0]))
+    inv_local = np.linalg.inv(np.linalg.inv(left_h) @ right_h)
     z_axis = neutral[:3, 2]
     x_axis = neutral[:3, 0]
     joints = list(arms['left']['initial'])
-    maneuvers = [(z_axis, -180.0), (x_axis, 30.0), (x_axis, -30.0)]
-    for axis, angle in maneuvers:
+    # The Z roll is a joint-6 move (no IK), so only the IK targets are checked.
+    maneuvers = [(x_axis, 30.0), (x_axis, -30.0)]
+    for a, angle in maneuvers:
         target = neutral.copy()
-        target[:3, :3] = (Rotation.from_rotvec(np.asarray(axis) * math.radians(angle)).as_matrix()
+        target[:3, :3] = (Rotation.from_rotvec(np.asarray(a) * math.radians(angle)).as_matrix()
                           @ neutral[:3, :3])
-        solution, error = chains['left'].solve_ik(target, joints)
+        solution, error = chains['left'].solve_ik(target @ inv_local, joints)
         assert solution is not None, f'left display {angle} not reachable'
         joints = solution
     # Bottom facing the camera: at least one roll must be reachable.
@@ -120,7 +138,7 @@ def test_left_mirror_display_is_reachable(kinematics):
         xx = xx / np.linalg.norm(xx)
         xx = Rotation.from_rotvec(to_camera * math.radians(roll)).as_matrix() @ xx
         base[:3, :3] = np.column_stack((xx, np.cross(to_camera, xx), to_camera))
-        if chains['left'].solve_ik(base, joints)[0] is not None:
+        if chains['left'].solve_ik(base @ inv_local, joints)[0] is not None:
             reachable = True
             break
     assert reachable, 'left bottom facing view not reachable at any roll'
