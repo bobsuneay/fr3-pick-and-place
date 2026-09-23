@@ -13,10 +13,13 @@ display_turn_step_deg: 15
 display_turn_direction: -1
 # Extra fixed tilts about the part's X axis after the full Z turn.
 display_x_tilts_deg: [30, -30]
-handover_centerline_tolerance_m: 0.005
+handover_centerline_tolerance_m: 0.010
 handover_centerline_angle_deg: 5.0
 handover_center_xyz: [0.35, 0.0, 1.00]
 handover_separation_m: 0.16
+# After the ready pose the left hand moves in to this part-sized gap (m) from
+# the right hand, so the handover is a real approach rather than a no-op.
+handover_grip_separation_m: 0.02
 workpiece:
   # Upright cylindrical part: height 35 mm, diameter 16 mm.
   shape: cylinder

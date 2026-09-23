@@ -110,6 +110,10 @@ class DemoApp(Node):
             raise ValueError('Handover centerline tolerance must be 1..20 mm')
         if not math.radians(1) <= self.handover_angle_tolerance <= math.radians(15):
             raise ValueError('Handover centerline angle tolerance must be 1..15 deg')
+        self.handover_grip_separation = float(
+            config.get('handover_grip_separation_m', 0.02))
+        if not 0.0 <= self.handover_grip_separation <= 0.10:
+            raise ValueError('Handover grip separation must be 0..100 mm')
         self.scene = DemoScene(
             self, self.motion, scene, dimensions, offset,
             show_workpiece=config.get('show_workpiece_in_rviz', False), shape=shape)
@@ -645,13 +649,11 @@ class DemoApp(Node):
         taught_right = matrix(generated['right']['tcp'])
         live_right = matrix(self.motion.tcp_poses()['right'])
 
-        # Preserve the taught axial spacing, but remove all lateral offset.
-        taught_axis = taught_right[:3, 2]
-        axial_spacing = float(np.dot(
-            taught_left[:3, 3] - taught_right[:3, 3], taught_axis))
+        # Move the receiver in from the ready pose to the part-sized grip gap
+        # so the handover is a real approach, not a no-op at the ready point.
         donor_axis = live_right[:3, 2]
         target = np.eye(4)
-        target[:3, 3] = live_right[:3, 3] + axial_spacing * donor_axis
+        target[:3, 3] = live_right[:3, 3] + self.handover_grip_separation * donor_axis
 
         # Receiver Z faces donor Z. Preserve its taught roll as closely as
         # possible by projecting the taught X axis onto the new normal plane.
