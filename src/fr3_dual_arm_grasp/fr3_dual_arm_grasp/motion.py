@@ -29,8 +29,8 @@ def pose_values(pose):
 
 class DualArmMoveIt:
     def __init__(self, node, feedback, stop, enabled=False, speed=0.1, kinematics=None):
-        if not 0 < speed <= 0.3:
-            raise ValueError('Demo speed must be > 0 and <= 0.3')
+        if not 0 < speed <= 0.8:
+            raise ValueError('Demo speed must be > 0 and <= 0.8')
         self.node, self.feedback, self.stop = node, feedback, stop
         self.enabled, self.speed = enabled, speed
         # Offline analytic chains used for a robust numeric IK fallback. The

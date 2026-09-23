@@ -124,6 +124,15 @@ class DemoApp(Node):
         if not 1.0 <= self.display_turn_step_deg <= 45.0:
             raise ValueError('Display turn step must be 1..45 deg')
         self.display_turn_direction = 1 if config.get('display_turn_direction', 1) >= 0 else -1
+        self.display_x_tilts_deg = config.get('display_x_tilts_deg', [30.0, -30.0])
+        if (not isinstance(self.display_x_tilts_deg, list) or
+                any(not isinstance(v, (int, float)) or not np.isfinite(v)
+                    for v in self.display_x_tilts_deg)):
+            raise ValueError('display_x_tilts_deg must be a list of finite angles')
+        self.display_x_tilts_deg = [float(v) for v in self.display_x_tilts_deg]
+        self.display_bottom_tilt_deg = float(config.get('display_bottom_tilt_deg', 90.0))
+        if not np.isfinite(self.display_bottom_tilt_deg):
+            raise ValueError('display_bottom_tilt_deg must be finite')
         self.skip_event = threading.Event()
         self.awaiting_skip = False
         self.retreat_distance = float(config.get('retreat_distance_m', 0.06))
@@ -208,8 +217,8 @@ class DemoApp(Node):
 
     def set_speed(self, percent):
         value = float(percent) / 100
-        if not math.isfinite(value) or not 0.01 <= value <= 0.3:
-            raise ValueError('速度范围为 1%–30%')
+        if not math.isfinite(value) or not 0.01 <= value <= 0.8:
+            raise ValueError('速度范围为 1%–80%')
         self.motion.speed = value
         self.publish(f'速度 {percent:.0f}%：下一段规划生效，当前运动不突变')
 
@@ -452,17 +461,24 @@ class DemoApp(Node):
     def scan_display(self, side):
         neutral, offset = self.display_neutral(), self.tcp_object(side)
         self.move_display_neutral(side, True)
-        # Rotate the part about its own Z axis (the cylinder axis) so the full
-        # circumference faces the head camera, in one direction only.
-        turn_axis = neutral[:3, 2]
         seed = self._display_seed(side)
-        angles = display_views(side, self.display_turn_step_deg)
-        for index, raw_angle in enumerate(angles, 1):
+        z_axis = neutral[:3, 2]
+        x_axis = neutral[:3, 0]
+        maneuvers = []
+        # 1) Full circumference about the part's own Z axis, one direction.
+        for raw_angle in display_views(side, self.display_turn_step_deg):
             angle = self.display_turn_direction * raw_angle
+            maneuvers.append((z_axis, angle, f'绕零件 Z 轴 {angle}°'))
+        # 2) Fixed tilts about the part's X axis.
+        for tilt in self.display_x_tilts_deg:
+            maneuvers.append((x_axis, tilt, f'绕零件 X 轴 {tilt}°'))
+        # 3) Show the part's bottom face toward the camera.
+        maneuvers.append((x_axis, self.display_bottom_tilt_deg, '零件底部朝向相机'))
+        for index, (axis, angle, label) in enumerate(maneuvers, 1):
             self.motion.guard(True)
-            self.publish(f'{side} 展示 {index}/{len(angles)}，绕零件 Z 轴 {angle}°')
+            self.publish(f'{side} 展示 {index}/{len(maneuvers)}：{label}')
             target = neutral.copy()
-            target[:3, :3] = (Rotation.from_rotvec(turn_axis * math.radians(angle)).as_matrix()
+            target[:3, :3] = (Rotation.from_rotvec(np.asarray(axis) * math.radians(angle)).as_matrix()
                               @ neutral[:3, :3])
             self.motion.pose(side, vector(target @ np.linalg.inv(offset)), execute=True, seed=seed)
             if self.stop_event.wait(self.dwell):

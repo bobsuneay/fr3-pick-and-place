@@ -50,15 +50,21 @@ def test_display_turn_is_reachable(kinematics):
     seed = [math.radians(v) for v in (-109, -137, -107, -28, 94, 18)]
     tcp = chains['right'].fk(seed)
     neutral = tcp.copy()
-    turn_axis = neutral[:3, 2]
+    z_axis = neutral[:3, 2]
+    x_axis = neutral[:3, 0]
 
     joints = list(seed)
-    views = display_views('right')
-    for angle in views:
+    maneuvers = []
+    for raw in display_views('right'):
+        maneuvers.append((z_axis, raw, f'Z {raw}'))
+    for tilt in (30.0, -30.0):
+        maneuvers.append((x_axis, tilt, f'X {tilt}'))
+    maneuvers.append((x_axis, 90.0, 'bottom'))
+    for axis, angle, label in maneuvers:
         target = neutral.copy()
-        target[:3, :3] = (Rotation.from_rotvec(turn_axis * math.radians(angle)).as_matrix()
+        target[:3, :3] = (Rotation.from_rotvec(np.asarray(axis) * math.radians(angle)).as_matrix()
                           @ neutral[:3, :3])
         solution, error = chains['right'].solve_ik(target, joints)
-        assert solution is not None, f'display angle {angle} is not reachable'
+        assert solution is not None, f'display maneuver {label} is not reachable'
         assert error[0] < 0.005 and error[1] < math.radians(1.0)
         joints = solution

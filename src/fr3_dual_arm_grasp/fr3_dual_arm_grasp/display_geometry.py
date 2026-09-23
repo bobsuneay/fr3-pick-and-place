@@ -13,7 +13,7 @@ def display_views(side, step_deg=15):
     step = int(step_deg)
     if step < 1:
         step = 15
-    return [angle for angle in range(step, 360, step)] + [360]
+    return [angle for angle in range(step, 180, step)] + [180]
 
 
 # Compatibility export; the application computes the turn from display_views.

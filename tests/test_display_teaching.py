@@ -14,9 +14,8 @@ from fr3_dual_arm_grasp.teaching import TeachingMode
 
 
 def test_display_views_is_one_direction_full_turn():
-    assert display_views('right') == list(range(15, 360, 15)) + [360]
-    assert display_views('left', 30) == [30, 60, 90, 120, 150, 180,
-                                         210, 240, 270, 300, 330, 360]
+    assert display_views('right') == list(range(15, 180, 15)) + [180]
+    assert display_views('left', 30) == [30, 60, 90, 120, 150, 180]
 
 
 def test_camera_neutral_center_sits_on_optical_axis():
