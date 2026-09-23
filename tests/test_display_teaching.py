@@ -17,7 +17,11 @@ def test_camera_center_and_all_interpolated_views_with_offset():
     neutral = camera_neutral(camera, taught, offset)
     expected = np.array(camera['xyz']) + Rotation.from_euler('xyz', camera['rpy']).apply([.3, 0, 0])
     np.testing.assert_allclose(neutral[:3, 3], expected, atol=1e-12)
-    assert len(VIEWS) == 18
+    assert VIEWS == [
+        [0, 0, 0],
+        [15, 0, 0], [60, 0, 0], [120, 0, 0], [180, 0, 0],
+        [0, 0, 15], [0, 0, 60], [0, 0, 120], [0, 0, 180],
+    ]
     for angles in VIEWS:
         target = neutral.copy()
         target[:3, :3] = neutral[:3, :3] @ Rotation.from_euler('xyz', angles, degrees=True).as_matrix()

@@ -16,7 +16,7 @@ def motion(monkeypatch):
         'moveit_msgs.action': ['MoveGroup', 'ExecuteTrajectory'],
         'moveit_msgs.msg': ['Constraints', 'JointConstraint', 'RobotState',
                             'PositionConstraint', 'OrientationConstraint', 'DisplayTrajectory'],
-        'moveit_msgs.srv': ['GetPositionFK', 'GetCartesianPath', 'GetStateValidity'],
+        'moveit_msgs.srv': ['GetPositionFK', 'GetPositionIK', 'GetCartesianPath', 'GetStateValidity'],
         'rclpy.action': ['ActionClient'], 'sensor_msgs.msg': ['JointState'],
         'shape_msgs.msg': ['SolidPrimitive'],
     }
@@ -134,30 +134,37 @@ def test_measured_target_failure_identifies_joint_and_error(motion, monkeypatch)
         motion.verify_targets({'right_j3': 0.02})
 
 
-def test_both_tcp_targets_form_one_both_arms_goal(motion, monkeypatch):
+@pytest.mark.parametrize('execute', [False, True])
+def test_both_tcp_targets_form_one_both_arms_goal(motion, monkeypatch, execute):
     module = motion._test_module
-    def pose():
-        return SimpleNamespace(
-            position=SimpleNamespace(x=0.0, y=0.0, z=0.0),
-            orientation=SimpleNamespace(x=0.0, y=0.0, z=0.0, w=1.0))
-    monkeypatch.setattr(module, 'Pose', pose)
-    monkeypatch.setattr(module, 'Constraints', lambda: SimpleNamespace(
-        position_constraints=[], orientation_constraints=[]))
-    monkeypatch.setattr(module, 'PositionConstraint', lambda: SimpleNamespace(
-        header=SimpleNamespace(frame_id=''), link_name='', weight=0.0,
-        constraint_region=SimpleNamespace(primitives=[], primitive_poses=[])))
-    monkeypatch.setattr(module, 'OrientationConstraint', lambda: SimpleNamespace(
-        header=SimpleNamespace(frame_id=''), link_name='', weight=0.0,
-        orientation=None, absolute_x_axis_tolerance=0.0,
-        absolute_y_axis_tolerance=0.0, absolute_z_axis_tolerance=0.0))
-    monkeypatch.setattr(module, 'SolidPrimitive', type('Primitive', (), {'SPHERE': 2}))
-    captured = {}
-    motion._goal = lambda group, constraints, execute: captured.update(
-        group=group, constraints=constraints, execute=execute)
-    target = [0.4, 0.1, 0.8, 0.0, 0.0, 0.0, 1.0]
-    motion.poses({'left': target, 'right': target}, 'both_arms', True)
-    assert captured['group'] == 'both_arms' and captured['execute'] is True
-    assert [item.link_name for item in captured['constraints'].position_constraints] == [
-        'left_gripper_tcp', 'right_gripper_tcp']
-    assert [item.link_name for item in captured['constraints'].orientation_constraints] == [
-        'left_gripper_tcp', 'right_gripper_tcp']
+    monkeypatch.setattr(module, 'Constraints', lambda: SimpleNamespace(joint_constraints=[]))
+    targets = {
+        'left': [0.4, 0.1, 0.8, 0.0, 0.0, 0.0, 1.0],
+        'right': [0.5, -0.1, 0.9, 0.0, 0.0, 0.0, 1.0],
+    }
+    solutions = {
+        'left': {f'left_j{i}': i * 0.1 for i in range(1, 7)},
+        'right': {f'right_j{i}': -i * 0.1 for i in range(1, 7)},
+    }
+    ik_calls, goals, verified = [], [], []
+    def ik(side, values):
+        ik_calls.append((side, values))
+        return solutions[side]
+    motion._ik_joints = ik
+    motion.tcp_poses = lambda state: targets
+    motion.verify_targets = lambda values: verified.append(values)
+    sentinel = object()
+    def goal(group, constraints, execute):
+        goals.append((group, constraints, execute))
+        return sentinel
+    motion._goal = goal
+
+    assert motion.poses(targets, 'both_arms', execute) is sentinel
+    assert ik_calls == list(targets.items())
+    assert len(goals) == 1
+    group, constraints, requested_execution = goals[0]
+    assert group == 'both_arms' and requested_execution is execute
+    expected = {**solutions['left'], **solutions['right']}
+    assert len(constraints.joint_constraints) == 12
+    assert {item.joint_name: item.position for item in constraints.joint_constraints} == expected
+    assert verified == ([expected] if execute else [])
