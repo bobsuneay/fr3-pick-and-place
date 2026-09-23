@@ -191,7 +191,7 @@ workpiece:
 | 8 | `attach right` | 软件状态把零件持有者记录为右手，并保存 TCP 到零件的相对变换。默认不向 RViz 发布零件碰撞体。 |
 | 9 | `lift right right_pregrasp` | 右手带件抬升回 `right_pregrasp`（关节空间），形成可控抬升。 |
 | 10 | `scan right right_display` | 右手先到参考展示姿态，再绕零件 Z 轴单向转 180°（每 15°），绕 X 轴 ±30°，最后让底部朝向相机。 |
-| 11 | `move both handover_ready` | 右手先到交接预备位、再左手依次到达（不一起动）；两夹爪 Z 轴共线（沿 world Y 对指），且绕 Z 轴相差 90°，避免手指相撞。 |
+| 11 | `move both handover_ready` | 右手先到交接预备位、再左手依次到达（不一起动）；右手停在 -Y 侧、左手停在 +Y 侧，两夹爪 Z 轴共线沿 world Y 对指，且绕 Z 轴相差 90°，两臂不交叉、手指不相撞。 |
 | 12 | `touch left` | 若启用零件碰撞体，临时允许左右手指与零件接触；默认隐藏零件时仅更新流程接触状态。 |
 | 13 | `receive left left_receive` | 根据 `handover_center_xyz` 和 `handover_separation_m` 生成交接目标，再读取右手实时 TCP 自动修正左手中心线。修正目标通过左臂 IK、OMPL 和碰撞检测后执行，右臂保持不动。 |
 | 14 | `grasp left left_receive` | 到位后复核中心线横向误差 ≤5 mm、角度误差 ≤5°；通过后左夹爪闭合至 15 mm 并按实际开度自动确认，避免与右手夹爪相撞。失败时右手继续夹持。 |

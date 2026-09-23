@@ -77,7 +77,7 @@ def test_handover_y_axis_is_reachable(kinematics):
     right = np.eye(4)
     left = np.eye(4)
     right[:3, :3], left[:3, :3] = right_r, left_r
-    right[:3, 3] = center + axis * separation / 2.0
-    left[:3, 3] = center - axis * separation / 2.0
+    right[:3, 3] = center - axis * separation / 2.0
+    left[:3, 3] = center + axis * separation / 2.0
     assert chains['right'].solve_ik(right, arms['right']['initial'])[0] is not None
     assert chains['left'].solve_ik(left, arms['left']['initial'])[0] is not None

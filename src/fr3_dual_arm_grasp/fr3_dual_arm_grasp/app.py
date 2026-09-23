@@ -386,8 +386,11 @@ class DemoApp(Node):
             left_r = np.column_stack((np.cross(y_left, z_left), y_left, z_left))
             right = np.eye(4); left = np.eye(4)
             right[:3, :3], left[:3, :3] = right_r, left_r
-            right[:3, 3] = center + axis * separation / 2.0
-            left[:3, 3] = center - axis * separation / 2.0
+            # Keep the right hand on its natural -Y side and the left hand on
+            # its +Y side so the two arms never cross each other; both approach
+            # the shared part from their own side.
+            right[:3, 3] = center - axis * separation / 2.0
+            left[:3, 3] = center + axis * separation / 2.0
             return {
                 'right': dict(tcp=vector(right), joints=self.book.points['ready']['right']['joints'], gap_m=0.0),
                 'left': dict(tcp=vector(left), joints=self.book.points['ready']['left']['joints'], gap_m=0.0),
