@@ -112,7 +112,7 @@ def test_left_same_object_display_is_reachable(kinematics):
     axis = np.array([0.0, 1.0, 0.0])
     hcenter = np.array([0.35, 0.0, 1.0])
     right_h = _pose(hcenter - axis * 0.08, axis, np.array([0.0, 0.0, 1.0]))
-    left_h = _pose(hcenter - axis * 0.08 + axis * 0.02, -axis, np.array([1.0, 0.0, 0.0]))
+    left_h = _pose(hcenter - axis * 0.08 + axis * 0.010, -axis, np.array([1.0, 0.0, 0.0]))
     inv_local = np.linalg.inv(np.linalg.inv(left_h) @ right_h)
     z_axis = neutral[:3, 2]
     x_axis = neutral[:3, 0]

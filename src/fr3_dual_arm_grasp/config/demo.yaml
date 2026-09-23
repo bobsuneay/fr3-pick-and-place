@@ -24,9 +24,10 @@ handover_centerline_tolerance_m: 0.010
 handover_centerline_angle_deg: 5.0
 handover_center_xyz: [0.35, 0.0, 1.00]
 handover_separation_m: 0.16
-# After the ready pose the left hand moves in to this part-sized gap (m) from
-# the right hand, so the handover is a real approach rather than a no-op.
-handover_grip_separation_m: 0.02
+# After the ready pose the left hand moves in to this TCP gap (m) from the
+# right hand, measured along the handover axis and biased to the left side so
+# the two finger pairs interleave without colliding on the part.
+handover_grip_separation_m: 0.010
 workpiece:
   # Upright cylindrical part: height 35 mm, diameter 16 mm.
   shape: cylinder

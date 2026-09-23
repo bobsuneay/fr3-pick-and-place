@@ -94,7 +94,7 @@ ros2 launch fr3_dual_arm_grasp grasp.launch.py enable_execution:=false
 2. `right_pregrasp`：右手位于零件上方的预夹取位姿。程序从这个点复制 x/y，把 z 改为桌面上方 15 mm，并将 TCP 轴调整为竖直向下，自动生成 `right_grasp`。
 3. `left_place`：左手放置位姿。程序自动生成放置上方点、下降和放置后的抬升路径。
 
-展示点由头部相机光轴中心和 30 cm 距离自动生成；交接预备间距由 `handover_separation_m` 给出，左手接取时再从预备位伸进到 `handover_grip_separation_m`（默认 20 mm）的零件尺寸间隙，并根据右手实时 TCP 动态对齐。旧文件中的 `right_grasp`、`right_display`、`handover_ready`、`left_receive` 会被保留读取但不再要求重新采集。
+展示点由头部相机光轴中心和 30 cm 距离自动生成；交接预备间距由 `handover_separation_m` 给出，左手接取时再从预备位伸进到 `handover_grip_separation_m`（默认 10 mm，沿交接轴偏向左手一侧，让两副手指交错夹住零件而不相撞），并根据右手实时 TCP 动态对齐。旧文件中的 `right_grasp`、`right_display`、`handover_ready`、`left_receive` 会被保留读取但不再要求重新采集。
 
 交接后右手沿自身 TCP 的负 Z 方向撤离 `retreat_distance_m`（默认 6 cm），再回到就绪点；放置点用 `left_place` 的 x/y，z 取桌面上方 `grasp_clearance_m`（默认 15 mm，与右手取件一致）并把夹爪调竖直（镜像右手的取件动作），随后直线 MoveL 下降、放下后直线抬升。参数在 demo.yaml 中，方向必须符合现场夹持几何；路径不通会停止。夹爪不会跟随展示点开合：右手释放使用 right_pregrasp 的开度，左手张开/释放使用 ready 的开度。
 
@@ -147,7 +147,7 @@ ros2 launch fr3_dual_arm_bringup pick_place.launch.py \
 
 抓取时夹爪命令完全闭合，由 `hardware.yaml` 的夹持力限制停止。实际开度连续稳定并落在 `demo.yaml` 的允许范围后，流程自动继续；右手只在左手也通过检查后松开。该判断依赖开度，不等同于触觉或掉落检测。
 
-交接时以右手实时 `gripper_tcp` 的 Z 中心轴为基准：先到 `handover_separation_m` 的预备位，再由左手沿该轴伸进到 `handover_grip_separation_m` 的零件尺寸间隙并自动对齐中心线；左手 Z 轴自动调整为与右手反向，修正后的目标通过 MoveIt 求逆解、OMPL 和碰撞检测；到位后按默认 10 mm、5° 容差复核（横向误差主要来自关节到位精度）。
+交接时以右手实时 `gripper_tcp` 的 Z 中心轴为基准：先到 `handover_separation_m` 的预备位，再由左手沿该轴伸进到 `handover_grip_separation_m`（默认 10 mm，偏向左手一侧）并自动对齐中心线；左手 Z 轴自动调整为与右手反向，修正后的目标通过 MoveIt 求逆解、OMPL 和碰撞检测；到位后按默认 10 mm、5° 容差复核（横向误差主要来自关节到位精度）。
 
 ### 6.1 实机夹爪参数
 
@@ -193,7 +193,7 @@ workpiece:
 | 10 | `scan right right_display` | 右手先到光轴前方 0.30 m 的展示位，再让关节 6 转 -180°，绕 X 轴 ±30°，最后把零件 +Z 轴直接正对相机展示底部。 |
 | 11 | `move both handover_ready` | 右手先到交接预备位、再左手依次到达（不一起动）；右手停在 -Y 侧、左手停在 +Y 侧，两夹爪 Z 轴共线沿 world Y 对指，且绕 Z 轴相差 90°，两臂不交叉、手指不相撞。 |
 | 12 | `touch left` | 若启用零件碰撞体，临时允许左右手指与零件接触；默认隐藏零件时仅更新流程接触状态。 |
-| 13 | `receive left left_receive` | 左手从预备位伸进到 `handover_grip_separation_m`（默认 20 mm）的零件尺寸间隙，并读取右手实时 TCP 自动修正中心线。修正目标通过左臂 IK、OMPL 和碰撞检测后执行，右臂保持不动。 |
+| 13 | `receive left left_receive` | 左手从预备位伸进到 `handover_grip_separation_m`（默认 10 mm，偏向左手一侧），并读取右手实时 TCP 自动修正中心线。修正目标通过左臂 IK、OMPL 和碰撞检测后执行，右臂保持不动。 |
 | 14 | `grasp left left_receive` | 到位后复核中心线横向误差 ≤10 mm、角度误差 ≤5°；通过后左夹爪闭合至 15 mm 并按实际开度自动确认，避免与右手夹爪相撞。失败时右手继续夹持。 |
 | 15 | `transfer left` | 只有左夹爪确认成功后，软件持有者才从右手切换为左手。 |
 | 16 | `grip right right_pregrasp` | 右夹爪张开到预抓取点保存的开度，正式释放零件。 |
