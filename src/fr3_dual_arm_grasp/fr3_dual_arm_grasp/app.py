@@ -548,8 +548,10 @@ class DemoApp(Node):
         self.move_display_neutral(side, True)
         neutral = self.display_neutral(side, self.active_display_distance)
         seed = self._display_seed(side)
-        z_axis = neutral[:3, 2]
-        x_axis = neutral[:3, 0]
+        # Tilt about a fixed world axis (the right hand's neutral X) so both
+        # hands tilt the part in the same world direction; the left hand's own
+        # neutral X is rolled by its preset, which made the tilt look wrong.
+        x_axis = self.display_neutral('right', self.active_display_distance)[:3, 0]
 
         # 1) Roll the wrist: turn joint 6 by 180 degrees in one joint move.
         # This is exactly the part rotating about its own axis, without relying

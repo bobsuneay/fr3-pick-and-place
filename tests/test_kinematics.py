@@ -108,14 +108,16 @@ def test_left_same_object_display_is_reachable(kinematics):
     neutral[:3, 3] = center
     # Same part pose as the right; the left resolves it with its own grip.
     neutral[:3, :3] = right_tcp[:3, :3]
+    # Left display preset: pre-roll the part 90 degrees about its own axis.
+    neutral[:3, :3] = neutral[:3, :3] @ Rotation.from_euler('z', 90, degrees=True).as_matrix()
     # Left grip transform from the handover (right -Y, left +Y, 20 mm grip gap).
     axis = np.array([0.0, 1.0, 0.0])
     hcenter = np.array([0.35, 0.0, 1.0])
     right_h = _pose(hcenter - axis * 0.08, axis, np.array([0.0, 0.0, 1.0]))
     left_h = _pose(hcenter - axis * 0.08 + axis * 0.010, -axis, np.array([1.0, 0.0, 0.0]))
     inv_local = np.linalg.inv(np.linalg.inv(left_h) @ right_h)
-    z_axis = neutral[:3, 2]
-    x_axis = neutral[:3, 0]
+    # X tilt uses a fixed world axis (the right hand's neutral X).
+    x_axis = right_tcp[:3, 0]
     joints = list(arms['left']['initial'])
     # The Z roll is a joint-6 move (no IK), so only the IK targets are checked.
     maneuvers = [(x_axis, 30.0), (x_axis, -30.0)]
