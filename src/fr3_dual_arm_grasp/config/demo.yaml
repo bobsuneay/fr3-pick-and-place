@@ -3,6 +3,9 @@ scene_and_object_verified: false
 display_dwell_seconds: 2.0
 # Distance from the head camera optical centre to the part during display.
 display_distance_m: 0.30
+# Preferred display distances (m), tried in order; the first that is reachable
+# (and collision free) is used, so a hand can step in or out to avoid a limit.
+display_distance_options_m: [0.30, 0.26, 0.34, 0.22, 0.38, 0.20, 0.40, 0.42]
 # Reference right-arm posture (deg) for the camera display: the gripper faces
 # the head camera sideways and stays perpendicular to the optical axis.  Used
 # as the IK seed and neutral orientation; does not need to be exact.

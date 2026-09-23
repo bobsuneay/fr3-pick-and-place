@@ -123,6 +123,15 @@ class DemoApp(Node):
         self.display_distance = float(config.get('display_distance_m', 0.30))
         if not 0.1 <= self.display_distance <= 1.0:
             raise ValueError('Display distance must be 0.1..1.0 m')
+        options = config.get('display_distance_options_m')
+        if options is None:
+            self.display_distance_options = [self.display_distance]
+        else:
+            self.display_distance_options = [float(v) for v in options]
+            if (not self.display_distance_options or
+                    any(not 0.1 <= v <= 1.0 for v in self.display_distance_options)):
+                raise ValueError('display_distance_options_m must be distances in 0.1..1.0 m')
+        self.active_display_distance = self.display_distance
         self.display_pose_joints_deg = config.get('display_pose_joints_deg')
         if self.display_pose_joints_deg is not None:
             self.display_pose_joints_deg = finite_vector(
@@ -493,7 +502,7 @@ class DemoApp(Node):
         result[:3, 3] = np.asarray(camera['xyz'])
         return result
 
-    def display_neutral(self, side='right'):
+    def display_neutral(self, side='right', distance=None):
         # Place the part centre on the head-camera optical axis at the
         # configured distance (within the reachable 0.12-0.36 m window for a
         # face-on view), keeping the reference posture's side-on orientation.
@@ -504,7 +513,8 @@ class DemoApp(Node):
         # shows the same part pose instead.
         optical = self._camera_optical_transform()
         obj = np.eye(4)
-        obj[:3, 3] = optical[:3, 3] + optical[:3, 2] * self.display_distance
+        obj[:3, 3] = optical[:3, 3] + optical[:3, 2] * (
+            self.display_distance if distance is None else float(distance))
         seed = self._display_seed('right')
         if seed is not None and 'right' in self.kinematics:
             tcp = self.kinematics['right'].fk(seed)
@@ -520,12 +530,23 @@ class DemoApp(Node):
         return obj
 
     def move_display_neutral(self, side, execute=False):
-        target = vector(self.display_neutral(side) @ np.linalg.inv(self.tcp_object(side)))
-        return self.motion.pose(side, target, execute=execute, seed=self._display_seed(side))
+        offset = self.tcp_object(side)
+        last = None
+        for distance in self.display_distance_options:
+            target = vector(self.display_neutral(side, distance) @ np.linalg.inv(offset))
+            try:
+                result = self.motion.pose(side, target, execute=execute, seed=self._display_seed(side))
+            except RuntimeError as exc:
+                last = exc
+                continue
+            self.active_display_distance = distance
+            return result
+        raise RuntimeError('展示位姿无解：' + str(last))
 
     def scan_display(self, side):
-        neutral, offset = self.display_neutral(side), self.tcp_object(side)
+        offset = self.tcp_object(side)
         self.move_display_neutral(side, True)
+        neutral = self.display_neutral(side, self.active_display_distance)
         seed = self._display_seed(side)
         z_axis = neutral[:3, 2]
         x_axis = neutral[:3, 0]
@@ -575,7 +596,7 @@ class DemoApp(Node):
         # on the left arm, so widen the distance and roll and use the first view
         # whose IK (with collision checking) succeeds.
         for delta in (0.0, -0.04, 0.04, -0.08, 0.08, -0.12, 0.12, -0.16, 0.16):
-            distance = self.display_distance + delta
+            distance = self.active_display_distance + delta
             if distance < 0.10 or distance > 0.60:
                 continue
             base = self._bottom_view(
