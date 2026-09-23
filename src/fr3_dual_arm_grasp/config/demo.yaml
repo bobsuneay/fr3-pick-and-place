@@ -13,8 +13,6 @@ display_turn_step_deg: 15
 display_turn_direction: -1
 # Extra fixed tilts about the part's X axis after the full Z turn.
 display_x_tilts_deg: [30, -30]
-# Final tilt (about the part X axis) that shows the part's bottom face.
-display_bottom_tilt_deg: -45
 handover_centerline_tolerance_m: 0.005
 handover_centerline_angle_deg: 5.0
 handover_center_xyz: [0.35, 0.0, 1.00]

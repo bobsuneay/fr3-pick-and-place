@@ -133,9 +133,6 @@ class DemoApp(Node):
                     for v in self.display_x_tilts_deg)):
             raise ValueError('display_x_tilts_deg must be a list of finite angles')
         self.display_x_tilts_deg = [float(v) for v in self.display_x_tilts_deg]
-        self.display_bottom_tilt_deg = float(config.get('display_bottom_tilt_deg', 90.0))
-        if not np.isfinite(self.display_bottom_tilt_deg):
-            raise ValueError('display_bottom_tilt_deg must be finite')
         self.skip_event = threading.Event()
         self.awaiting_skip = False
         self.retreat_distance = float(config.get('retreat_distance_m', 0.06))
@@ -457,19 +454,32 @@ class DemoApp(Node):
             return [math.radians(value) for value in self.display_pose_joints_deg]
         return None
 
+    def _camera_optical_transform(self):
+        camera = self.scene.scene['camera']
+        optical = (Rotation.from_euler('xyz', camera['rpy']) *
+                   Rotation.from_euler('xyz', [-math.pi / 2, 0, -math.pi / 2]))
+        result = np.eye(4)
+        result[:3, :3] = optical.as_matrix()
+        result[:3, 3] = np.asarray(camera['xyz'])
+        return result
+
     def display_neutral(self):
+        # Place the part centre on the head-camera optical axis at the
+        # configured distance (within the reachable 0.12-0.36 m window for a
+        # face-on view), keeping the reference posture's side-on orientation.
+        optical = self._camera_optical_transform()
+        obj = np.eye(4)
+        obj[:3, 3] = optical[:3, 3] + optical[:3, 2] * self.display_distance
         seed = self._display_seed('right')
         if seed is not None and 'right' in self.kinematics:
             tcp = self.kinematics['right'].fk(seed)
-            return tcp @ matrix(self.scene.offset)
-        taught = matrix(self.book.points['right_pregrasp']['right']['tcp'])
-        return taught @ matrix(self.scene.offset)
+            obj[:3, :3] = (tcp @ matrix(self.scene.offset))[:3, :3]
+        else:
+            taught = matrix(self.book.points['right_pregrasp']['right']['tcp'])
+            obj[:3, :3] = (taught @ matrix(self.scene.offset))[:3, :3]
+        return obj
 
     def move_display_neutral(self, side, execute=False):
-        if side == 'right' and self.display_pose_joints_deg is not None:
-            targets = {f'right_j{i}': math.radians(value)
-                       for i, value in enumerate(self.display_pose_joints_deg, 1)}
-            return self.motion.joints(targets, 'right_arm', execute)
         target = vector(self.display_neutral() @ np.linalg.inv(self.tcp_object(side)))
         return self.motion.pose(side, target, execute=execute, seed=self._display_seed(side))
 
@@ -512,12 +522,33 @@ class DemoApp(Node):
         # 3) Show the part's bottom face toward the camera.
         self.motion.guard(True)
         self.publish(f'{side} 展示：零件底部朝向相机')
-        target = neutral.copy()
-        target[:3, :3] = (Rotation.from_rotvec(x_axis * math.radians(self.display_bottom_tilt_deg)).as_matrix()
-                          @ neutral[:3, :3])
+        target = self._bottom_view(neutral)
         self.motion.pose(side, vector(target @ np.linalg.inv(offset)), execute=True, seed=seed)
         if self.stop_event.wait(self.dwell):
             raise RuntimeError('展示已停止')
+
+    def _bottom_view(self, neutral):
+        """Point the part's +Z axis directly back toward the head camera."""
+        optical = self._camera_optical_transform()
+        to_camera = optical[:3, 3] - neutral[:3, 3]
+        distance = float(np.linalg.norm(to_camera))
+        if distance < 1e-9:
+            return neutral
+        to_camera /= distance
+        from_axis = neutral[:3, 2] / np.linalg.norm(neutral[:3, 2])
+        cross = np.cross(from_axis, to_camera)
+        dot = float(np.dot(from_axis, to_camera))
+        if np.linalg.norm(cross) < 1e-9:
+            if dot < 0:
+                rotation = Rotation.from_rotvec(neutral[:3, 0] * math.pi)
+            else:
+                rotation = Rotation.identity()
+        else:
+            angle = math.atan2(float(np.linalg.norm(cross)), dot)
+            rotation = Rotation.from_rotvec(cross / np.linalg.norm(cross) * angle)
+        target = neutral.copy()
+        target[:3, :3] = rotation.as_matrix() @ neutral[:3, :3]
+        return target
 
     def retreat_donor(self):
         tcp = matrix(self.motion.tcp_poses()['right'])

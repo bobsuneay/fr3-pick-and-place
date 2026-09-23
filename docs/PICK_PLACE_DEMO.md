@@ -100,7 +100,7 @@ ros2 launch fr3_dual_arm_grasp grasp.launch.py enable_execution:=false
 
 ### 展示方式和相机位置
 
-展示基准取自 `demo.yaml` 的 `display_pose_joints_deg`（默认 `[-109, -137, -107, -28, 94, 18]` 度），这是一个“夹爪侧对相机、且与光轴垂直”的参考姿态，用于关节空间到达和 IK 种子，不必精确匹配。展示序列为：绕零件自身 Z 轴用一条连续笛卡尔路径转 180°（`display_turn_direction` 选方向，默认 −1，避免逐步 15°），再绕零件 X 轴 ±30°（`display_x_tilts_deg`，先转出去再回原位，零件中心保持不动），最后绕 X 轴转到 `display_bottom_tilt_deg`（默认 −45°，底部尽量朝向相机且放宽到可达范围）让底部朝向相机。
+展示位置取在头部相机光轴前方 `display_distance_m`（默认 0.30 m，位于可达的正对窗口 0.12–0.36 m 内），姿态用 `display_pose_joints_deg`（默认 `[-109, -137, -107, -28, 94, 18]` 度）的侧向朝向，参考关节角只作 IK 种子、不要求精确匹配。展示序列为：绕零件自身 Z 轴用一条连续笛卡尔路径转 180°（`display_turn_direction` 选方向，默认 −1），再绕零件 X 轴 ±30°（`display_x_tilts_deg`，先转出去再回原位、零件中心保持不动），最后把零件 +Z 轴直接转到正对相机，让底部完全朝向相机。
 
 先用关节空间到达参考展示姿态，再用连续笛卡尔路径完成 Z 180° 旋转（绕 TCP Z 是腕部滚转，笛卡尔可靠）；X ±30° 和底部视角用关节空间（带参考种子，零件中心基本不动）。任一视角 IK 无解时会暂停并提示，可点“跳过本步”继续下一个视角。UI 的 MoveL 使用笛卡尔路径，TCP 自由路径使用 IK/OMPL。
 
@@ -190,7 +190,7 @@ workpiece:
 | 7 | `grasp right right_grasp` | 右夹爪闭合至两爪间只剩 15 mm（`grasp_gap_m`），读取主指反馈换算总开度；连续 5 次变化不超过 0.5 mm 且落在配置范围才认为成功。 |
 | 8 | `attach right` | 软件状态把零件持有者记录为右手，并保存 TCP 到零件的相对变换。默认不向 RViz 发布零件碰撞体。 |
 | 9 | `lift right right_pregrasp` | 右手带件抬升回 `right_pregrasp`（关节空间），形成可控抬升。 |
-| 10 | `scan right right_display` | 右手先到参考展示姿态，再绕零件 Z 轴单向转 180°（每 15°），绕 X 轴 ±30°，最后让底部朝向相机。 |
+| 10 | `scan right right_display` | 右手先到光轴前方 0.30 m 的展示位，再绕零件 Z 轴一条连续路径转 180°，绕 X 轴 ±30°，最后把零件 +Z 轴直接正对相机展示底部。 |
 | 11 | `move both handover_ready` | 右手先到交接预备位、再左手依次到达（不一起动）；右手停在 -Y 侧、左手停在 +Y 侧，两夹爪 Z 轴共线沿 world Y 对指，且绕 Z 轴相差 90°，两臂不交叉、手指不相撞。 |
 | 12 | `touch left` | 若启用零件碰撞体，临时允许左右手指与零件接触；默认隐藏零件时仅更新流程接触状态。 |
 | 13 | `receive left left_receive` | 根据 `handover_center_xyz` 和 `handover_separation_m` 生成交接目标，再读取右手实时 TCP 自动修正左手中心线。修正目标通过左臂 IK、OMPL 和碰撞检测后执行，右臂保持不动。 |
