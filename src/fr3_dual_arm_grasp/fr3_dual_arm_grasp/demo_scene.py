@@ -31,7 +31,9 @@ def box_object(name, dimensions, pose, frame='world', shape='box'):
     primitive = SolidPrimitive()
     if shape == 'cylinder':
         primitive.type = SolidPrimitive.CYLINDER
-        primitive.dimensions = [float(dimensions[1]), float(dimensions[0])]
+        # shape_msgs CYLINDER expects [height, radius]; ``dimensions`` is
+        # [height, diameter, diameter] from the demo config.
+        primitive.dimensions = [float(dimensions[0]), float(dimensions[1]) / 2.0]
     else:
         primitive.type, primitive.dimensions = SolidPrimitive.BOX, list(map(float, dimensions))
     obj.primitives, obj.primitive_poses = [primitive], [pose_msg(pose)]
