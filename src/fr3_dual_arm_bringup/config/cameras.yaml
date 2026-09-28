@@ -1,0 +1,9 @@
+# Device identity only. Mount extrinsics belong to description/config/scene.yaml.
+# Set enabled: false to deploy one wrist camera at a time.
+cameras:
+  left_d405:
+    enabled: true
+    serial_no: ''
+  right_d405:
+    enabled: true
+    serial_no: ''

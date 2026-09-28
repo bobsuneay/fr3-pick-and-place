@@ -75,8 +75,13 @@ class ContractTests(unittest.TestCase):
                             ['ros__parameters']['use_local_topics'])
             self.assertTrue(controllers('real', side)[f'{side}_joint_state_broadcaster']
                             ['ros__parameters']['use_local_topics'])
-            self.assertFalse(controllers('gazebo', side)[f'{side}_joint_state_broadcaster']
-                             ['ros__parameters']['use_local_topics'])
+        gazebo = controllers('gazebo')
+        self.assertIn('joint_state_broadcaster', gazebo['controller_manager']['ros__parameters'])
+        self.assertNotIn('left_joint_state_broadcaster', gazebo)
+        self.assertNotIn('right_joint_state_broadcaster', gazebo)
+        joints = gazebo['joint_state_broadcaster']['ros__parameters']['joints']
+        self.assertEqual(len(joints), 14)
+        self.assertEqual(len(set(joints)), 14)
 
     def test_calibrated_limits_match_sdk_range(self):
         self.arms['gripper']['open_gap'] = 0.04

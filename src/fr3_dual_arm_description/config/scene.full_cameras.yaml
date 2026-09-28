@@ -43,27 +43,33 @@ cameras:
     far: 2.0
     rate: 10.0
     depth: false
-  left_d435i:
+  left_d405:
     parent: left_gripper_palm
-    xyz: [0.0, 0.080, 0.020]
+    xyz: [0.0, 0.080, 0.060]
     rpy: [0.0, -1.016, -1.5707963267948966]
-    width: 640
-    height: 480
-    horizontal_fov: 1.518
-    near: 0.10
-    far: 2.0
-    rate: 10.0
+    model: realsense_d405
+    size: [0.023, 0.042, 0.042]
+    mass: 0.060
+    width: 1280
+    height: 720
+    horizontal_fov: 1.5184364492350666
+    near: 0.07
+    far: 0.50
+    rate: 30.0
     depth: true
-  right_d435i:
+  right_d405:
     parent: right_gripper_palm
-    xyz: [0.0, 0.080, 0.020]
+    xyz: [0.0, 0.080, 0.060]
     rpy: [0.0, -1.016, -1.5707963267948966]
-    width: 640
-    height: 480
-    horizontal_fov: 1.518
-    near: 0.10
-    far: 2.0
-    rate: 10.0
+    model: realsense_d405
+    size: [0.023, 0.042, 0.042]
+    mass: 0.060
+    width: 1280
+    height: 720
+    horizontal_fov: 1.5184364492350666
+    near: 0.07
+    far: 0.50
+    rate: 30.0
     depth: true
 table:
   center_xy:
@@ -75,21 +81,31 @@ table:
   top_z: 0.75
   thickness: 0.04
   leg_width: 0.04
-bolts:
-  rows: 1
-  cols: 1
-  first_xy:
-  - 0.5
-  - -0.2
-  spacing_xy:
-  - 0.055
-  - 0.07
-  length: 0.045
-  shaft_radius: 0.006
-  head_radius: 0.009
-  head_length: 0.008
-  density: 7850.0
-  spawn_clearance: 0.0005
+bins:
+  right:
+    center_xy: [0.50, -0.48]
+    rows: 3
+    cols: 4
+    cell_pitch: 0.045
+    wall_thickness: 0.004
+    floor_thickness: 0.006
+    wall_height: 0.055
+    part_clearance_m: 0.001
+  left:
+    center_xy: [0.50, 0.48]
+    rows: 3
+    cols: 4
+    cell_pitch: 0.045
+    wall_thickness: 0.004
+    floor_thickness: 0.006
+    wall_height: 0.055
+part:
+  shape: cylinder
+  radius_m: 0.008
+  height_m: 0.035
+  mass_kg: 0.025
+  # Choose the right/front edge cell nearest this point for camera-guided grasp.
+  preferred_xy: [0.50, -0.48]
 physics:
   step_size: 0.001
   update_rate: 1000.0

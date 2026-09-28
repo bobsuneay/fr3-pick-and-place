@@ -5,8 +5,10 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
+from launch.conditions import IfCondition
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+from fr3_dual_arm_gazebo.startup import require_free_gazebo_master
 
 
 def project_config(share, package, name):
@@ -28,12 +30,18 @@ def start(context):
         '/head_camera/image_raw' if mode in ('mock', 'gazebo') else '/camera/color/image_raw')
     arguments = {key: arg(key) for key in ('scene', 'arms', 'enable_execution', 'rviz')}
     if mode == 'gazebo':
+        require_free_gazebo_master()
         arguments['camera_topic'] = camera_topic
     if mode == 'real':
         if not arg('hardware'):
             raise ValueError('hardware:=/path/to/fr3_dual_arm.hardware.yaml required for real mode')
         arguments['hardware'] = arg('hardware')
     return [
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(str(bringup / 'launch/cameras.launch.py')),
+            launch_arguments={key: arg(key) for key in
+                              ('mode', 'scene', 'camera_config', 'left_serial', 'right_serial')}.items(),
+            condition=IfCondition(LaunchConfiguration('wrist_cameras'))),
         IncludeLaunchDescription(PythonLaunchDescriptionSource(str(
             bringup / 'launch' / ('sim.launch.py' if mode == 'gazebo' else f'{mode}.launch.py'))),
                                  launch_arguments=arguments.items()),
@@ -51,9 +59,12 @@ def start(context):
 def generate_launch_description():
     description = Path(get_package_share_directory('fr3_dual_arm_description'))
     grasp = Path(get_package_share_directory('fr3_dual_arm_grasp'))
+    bringup = Path(get_package_share_directory('fr3_dual_arm_bringup'))
     defaults = {
         'mode': 'mock', 'enable_execution': 'false', 'hardware': '', 'rviz': 'true',
-        'camera_topic': '',
+        'camera_topic': '', 'wrist_cameras': 'false',
+        'left_serial': '', 'right_serial': '',
+        'camera_config': str(project_config(bringup, 'fr3_dual_arm_bringup', 'cameras.yaml')),
         'gui': 'true', 'speed': '0.1',
         'points': str(project_config(grasp, 'fr3_dual_arm_grasp', 'teach_points.json')),
         'scene': str(project_config(description, 'fr3_dual_arm_description', 'scene.yaml')),

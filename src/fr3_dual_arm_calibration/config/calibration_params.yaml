@@ -1,10 +1,12 @@
+# Optical frames below are the Gazebo frames. In real mode use CameraInfo.header.frame_id
+# (left/right_d405_color_optical_frame); the driver publishes its factory extrinsics.
 calibration_base_frame: world
 head_camera:
   optical_frame: head_camera_optical_frame
   topic: /head_camera/camera_info
-left_d435i:
-  optical_frame: left_d435i_optical_frame
-  topic: /left_d435i/camera_info
-right_d435i:
-  optical_frame: right_d435i_optical_frame
-  topic: /right_d435i/camera_info
+left_d405:
+  optical_frame: left_d405_optical_frame
+  topic: /left_d405/camera_info
+right_d405:
+  optical_frame: right_d405_optical_frame
+  topic: /right_d405/camera_info

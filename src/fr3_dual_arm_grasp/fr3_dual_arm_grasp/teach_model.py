@@ -13,10 +13,9 @@ JOINTS = tuple(f'{s}_j{i}' for s in SIDES for i in range(1, 7))
 MEASURED = JOINTS + tuple(f'{s}_left_finger_joint' for s in SIDES)
 SLOTS = {
     'ready': '双臂就绪（双夹爪张开）',
-    'right_pregrasp': '右手抓取接近点（张开，复用于抬升）',
     'left_place': '左手放置点（保持夹持）',
 }
-LEGACY_SLOTS = {'right_lift', 'right_view_1', 'right_view_2', 'right_retreat',
+LEGACY_SLOTS = {'right_pregrasp', 'right_lift', 'right_view_1', 'right_view_2', 'right_retreat',
                 'left_display', 'left_view_1', 'left_view_2', 'left_preplace', 'left_retreat',
                 'right_display', 'right_grasp', 'handover_ready', 'left_receive'}
 
@@ -184,15 +183,15 @@ def recipe():
     """Explicit ownership transitions; motion never silently changes a gripper."""
     return [
         ('move', 'both', 'ready'),
-        ('grip', 'right', 'right_pregrasp'), ('grip', 'left', 'ready'),
-        ('move', 'right', 'right_pregrasp'), ('orient', 'right', 'right_orient'),
+        ('grip', 'right', 'ready'), ('grip', 'left', 'ready'),
+        ('perceive', 'right', ''), ('orient', 'right', 'right_orient'),
         ('approach', 'right', 'right_grasp'),
         ('grasp', 'right', 'right_grasp'),
-        ('attach', 'right', ''), ('lift', 'right', 'right_pregrasp'),
+        ('attach', 'right', ''), ('lift', 'right', 'right_lift'),
         ('scan', 'right', 'right_display'),
         ('move', 'both', 'handover_ready'), ('touch', 'left', ''),
         ('receive', 'left', 'left_receive'), ('grasp', 'left', 'left_receive'),
-        ('transfer', 'left', ''), ('grip', 'right', 'right_pregrasp'),
+        ('transfer', 'left', ''), ('grip', 'right', 'ready'),
         ('retreat', 'right', ''), ('touch_only', 'left', ''),
         ('move', 'right', 'ready'),
         ('scan', 'left', 'right_display'),

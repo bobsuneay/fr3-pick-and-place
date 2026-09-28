@@ -13,8 +13,10 @@ from controller_manager_msgs.srv import SwitchController, ListControllers
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-from geometry_msgs.msg import PoseStamped
-from sensor_msgs.msg import JointState
+from sensor_msgs.msg import JointState, PointCloud2
+from sensor_msgs_py import point_cloud2
+from tf2_ros import Buffer, TransformListener
+from rclpy.time import Time
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 import yaml
@@ -24,6 +26,7 @@ from .teach_model import (Feedback, TeachBook, captured_point, model_fingerprint
                           finite_vector, pose_vector, validate_handover_centerline,
                           SIDES)
 from .motion import DualArmMoveIt, pose_values
+from .perception import estimate_upright_cylinder
 from .demo_scene import DemoScene
 from .workflow import run_workflow
 from .display_geometry import matrix, vector, camera_neutral, object_path, display_views
@@ -114,6 +117,10 @@ class DemoApp(Node):
             config.get('handover_grip_separation_m', 0.02))
         if not 0.0 <= self.handover_grip_separation <= 0.10:
             raise ValueError('Handover grip separation must be 0..100 mm')
+        scene_part=scene.get('part',{})
+        if scene_part and (abs(float(scene_part['radius_m'])-float(workpiece.get('radius_m',0)))>1e-9 or
+                           abs(float(scene_part['height_m'])-float(workpiece.get('height_m',0)))>1e-9):
+            raise ValueError('Gazebo scene part and demo workpiece dimensions must match')
         self.scene = DemoScene(
             self, self.motion, scene, dimensions, offset,
             show_workpiece=config.get('show_workpiece_in_rviz', False), shape=shape)
@@ -183,12 +190,23 @@ class DemoApp(Node):
         # UI-selectable policy for ordinary taught points. Display and
         # Cartesian approach/retreat segments remain TCP-based in both modes.
         self.keypoint_motion_mode = 'joints'
-        self.perception_candidate = None
+        self.cloud_lock = threading.Lock()
+        self.cloud_condition = threading.Condition(self.cloud_lock)
+        self.latest_cloud_pose = None
+        self.latest_cloud_target_id = None
+        self.locked_cloud_pose = None
+        self.locked_cloud_target_id = None
+        self.cloud_error = '等待右腕相机点云'
+        self._last_cloud_process = 0.0
+        self._stable_cloud_pose = None
+        self._stable_cloud_count = 0
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+        self.perception = config.get('perception', {})
+        self.create_subscription(PointCloud2, self.perception.get('cloud_topic', '/right_d405/points'),
+                                 self.on_point_cloud, qos_profile_sensor_data)
         self.status_pub = self.create_publisher(String, '/grasp/status_text', 10)
         self.create_subscription(JointState, '/joint_states', self.on_joints, qos_profile_sensor_data)
-        # Future perception adapter publishes an already transformed world TCP.
-        # Incoming messages are candidates only; they cannot start a motion.
-        self.create_subscription(PoseStamped, '/grasp/perception/grasp_tcp', self.on_candidate, 10)
         for name, callback in [('start', self.start_service), ('stop', self.stop_service),
                                ('skip', self.skip_service), ('status', self.status_service)]:
             self.create_service(Trigger, '/grasp/' + name, callback)
@@ -293,16 +311,79 @@ class DemoApp(Node):
         (self.teaching.enter if enabled else self.teaching.leave)()
         self.publish('拖动示教已启用，可拖动后采集' if enabled else '运动控制已恢复')
 
-    def on_candidate(self, msg):
-        if msg.header.frame_id != 'world':
-            self.get_logger().warning('Perception candidate rejected: transform TCP to world first')
+    def on_point_cloud(self, msg):
+        now=time.monotonic()
+        if now-self._last_cloud_process < .15:
             return
+        self._last_cloud_process=now
         try:
-            values = pose_vector(pose_values(msg.pose))
-        except ValueError:
-            return
-        self.perception_candidate = dict(tcp=values, stamp_sec=msg.header.stamp.sec,
-                                         stamp_nanosec=msg.header.stamp.nanosec)
+            data=point_cloud2.read_points(msg,field_names=('x','y','z'),skip_nans=True)
+            if isinstance(data,np.ndarray) and data.dtype.names:
+                points=np.column_stack([data[k].reshape(-1) for k in ('x','y','z')])
+            else:
+                points=np.asarray(list(data),dtype=float).reshape(-1,3)
+            if msg.header.frame_id == 'world':
+                rotation=np.eye(3);translation=np.zeros(3)
+            else:
+                stamp=Time.from_msg(msg.header.stamp)
+                transform=self.tf_buffer.lookup_transform('world',msg.header.frame_id,stamp)
+                t=transform.transform.translation;q=transform.transform.rotation
+                translation=np.array([t.x,t.y,t.z])
+                rotation=Rotation.from_quat([q.x,q.y,q.z,q.w]).as_matrix()
+            world=points@rotation.T+translation
+            cfg=dict(self.perception)
+            cfg['height_m']=float(self.demo_config['workpiece']['height_m'])
+            cfg['radius_m']=float(self.demo_config['workpiece']['radius_m'])
+            cfg['preferred_xy']=self.perception.get('preferred_xy',[.5,-.48])
+            found=estimate_upright_cylinder(world,cfg)
+            # Stable row/column identity is assigned from the detected centre,
+            # while selection itself is made from observed camera points.
+            bin_cfg=self.scene.scene['bins']['right'];cx,cy=bin_cfg['center_xy'];pitch=bin_cfg['cell_pitch']
+            col=int(np.clip(round((found.pose[0,3]-cx)/pitch+(bin_cfg['cols']-1)/2),0,bin_cfg['cols']-1))
+            row=int(np.clip(round((found.pose[1,3]-cy)/pitch+(bin_cfg['rows']-1)/2),0,bin_cfg['rows']-1))
+            target_id=f'right_part_{row:02d}_{col:02d}'
+            with self.cloud_condition:
+                if self._stable_cloud_pose is not None and np.linalg.norm(found.pose[:3,3]-self._stable_cloud_pose[:3,3]) < .004:
+                    self._stable_cloud_count += 1
+                else:
+                    self._stable_cloud_count=1
+                self._stable_cloud_pose=found.pose.copy()
+                if self._stable_cloud_count >= int(self.perception.get('stable_frames',3)):
+                    self.latest_cloud_pose=found.pose.copy()
+                    self.latest_cloud_stamp=time.monotonic()
+                    self.latest_cloud_target_id=target_id
+                    self.cloud_error=''
+                self.cloud_condition.notify_all()
+        except Exception as exc:
+            with self.cloud_condition:
+                self.cloud_error=str(exc)
+                self._stable_cloud_pose=None;self._stable_cloud_count=0
+
+    def require_cloud_pose(self):
+        with self.cloud_lock:
+            if self.locked_cloud_pose is None:
+                raise RuntimeError('抓取流程尚未锁定相机识别结果')
+            return self.locked_cloud_pose.copy()
+
+    def wait_for_perception(self):
+        self.publish('等待右腕 D405 点云稳定识别右盒圆柱')
+        with self.cloud_condition:
+            self.latest_cloud_pose=None;self.latest_cloud_target_id=None
+            self._stable_cloud_pose=None;self._stable_cloud_count=0
+            self.locked_cloud_pose=None;self.locked_cloud_target_id=None
+        deadline=time.monotonic()+float(self.perception.get('perception_timeout_seconds',15.0))
+        while time.monotonic()<deadline:
+            self.motion.guard(True)
+            with self.cloud_condition:
+                if (self.latest_cloud_pose is not None and self._stable_cloud_count >=
+                        int(self.perception.get('stable_frames',3))):
+                    self.latest_cloud_stamp=time.monotonic()
+                    self.locked_cloud_pose=self.latest_cloud_pose.copy()
+                    self.locked_cloud_target_id=self.latest_cloud_target_id
+                    return self.locked_cloud_pose.copy(),self.locked_cloud_target_id
+                remaining=min(.1,deadline-time.monotonic())
+                self.cloud_condition.wait(max(0,remaining))
+        raise RuntimeError('相机点云未稳定识别到右盒圆柱：'+self.cloud_error)
 
     def publish(self, text):
         self.status_text = text
@@ -387,14 +468,15 @@ class DemoApp(Node):
                                tcp_link='right_gripper_tcp', gap_m=gap))
 
     def generated_targets(self, name):
-        pre = self.book.points['right_pregrasp']['right']['tcp']
-        if name in ('right_orient', 'right_grasp'):
-            target = matrix(pre)
-            if name == 'right_grasp':
-                target[2, 3] = float(self.scene.scene['table']['top_z']) + self.grasp_clearance
-            # Keep the taught yaw/roll, but force TCP Z vertically downward.
+        if name in ('right_orient', 'right_grasp', 'right_lift'):
+            object_pose=self.require_cloud_pose()
+            target=object_pose @ np.linalg.inv(matrix(self.scene.offset))
             self._force_tcp_down(target)
-            return self._generated_point(vector(target), 0.0)
+            if name == 'right_orient':
+                target[2,3] += float(self.perception.get('approach_clearance_m',.07))
+            elif name == 'right_lift':
+                target[2,3] += float(self.demo_config.get('post_grasp_lift_m',.10))
+            return self._generated_point(vector(target),0.0)
         if name == 'left_place':
             # Mirror of the right pickup: place at the taught x/y but the same
             # clearance above the table as the pickup, gripper pointing down.
@@ -448,15 +530,20 @@ class DemoApp(Node):
     def grasp_target(self):
         return self.generated_targets('right_grasp')['right']['tcp']
 
+    def cloud_grasp_tcp(self, object_pose):
+        tcp=object_pose @ np.linalg.inv(matrix(self.scene.offset))
+        self._force_tcp_down(tcp)
+        return vector(tcp)
+
     def move_point(self, name, side, execute=False, linear=False):
         self.initialize_scene()
         if name == 'right_display':
             if side == 'both':
                 raise ValueError('展示中心由单臂占用，请选择左手或右手')
             return self.move_display_neutral(side, execute)
-        if name in ('right_orient', 'right_grasp', 'left_place', 'handover_ready'):
+        if name in ('right_orient', 'right_grasp', 'right_lift', 'left_place', 'handover_ready'):
             generated = self.generated_targets(name)
-            if name in ('right_orient', 'right_grasp'):
+            if name in ('right_orient', 'right_grasp', 'right_lift'):
                 # Orient in joint space, descend straight with MoveL; a pure
                 # vertical translation completes the Cartesian path reliably.
                 return self.motion.pose('right', generated['right']['tcp'], execute, linear=linear)
@@ -520,8 +607,8 @@ class DemoApp(Node):
             tcp = self.kinematics['right'].fk(seed)
             base = (tcp @ matrix(self.scene.offset))[:3, :3]
         else:
-            taught = matrix(self.book.points['right_pregrasp']['right']['tcp'])
-            base = (taught @ matrix(self.scene.offset))[:3, :3]
+            ready = self.book.points['ready']['right']['joints']
+            base = (self.kinematics['right'].fk(ready) @ matrix(self.scene.offset))[:3, :3]
         obj[:3, :3] = base
         preset = self.display_preset_deg.get(side, 0.0)
         if preset:

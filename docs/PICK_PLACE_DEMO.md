@@ -6,12 +6,12 @@
 
 - Tk 界面每 200 ms 自动刷新左右臂关节角、左右夹爪开口毫米/闭合百分比，并异步读取双臂 TCP。目标输入框独立，使用“当前姿态填入目标”复制当前测量。反馈过期显示错误，不继续显示为实时数据。
 - 单臂关节目标、TCP 位姿目标、MoveL 直线、夹爪目标均使用 MoveIt。预览与执行分开，启动默认禁止执行。
-- 3 个核心点同时保存双臂关节、世界坐标 TCP、夹爪开度：`ready`、`right_pregrasp`、`left_place`。抓取、展示和交接目标由运行时自动生成。速度滑条 0%–100%，改变后下一段规划生效，不改变正在执行的轨迹；SDK 夹爪闭合速度仍由 hardware.yaml 的 gripper.vel 设置。
+- 2 个示教点保存双臂关节、世界坐标 TCP、夹爪开度：`ready`、`left_place`。右手抓取目标、朝向和接近路径来自右腕 D405 点云识别。抓取、展示和交接目标由运行时自动生成。速度滑条 0%–100%，改变后下一段规划生效，不改变正在执行的轨迹；SDK 夹爪闭合速度仍由 hardware.yaml 的 gripper.vel 设置。
 - 执行时逐段规划。双臂交接预备点使用 `both_arms`；其他段使用对应单臂组，另一臂仍参与碰撞检测。普通关键点使用关节空间规划；展示旋转、交接后短距离撤离、放置下降/抬升使用完整笛卡尔路径碰撞检查。不可达或路径不完整时停止，不退化为绕行展示。
 - UI 的“关键点运行”按钮可在“保存的关节角”和“TCP 位姿反解”之间切换。TCP 模式下，普通单臂点以保存的 `world → gripper_tcp` 位姿交给 MoveIt IK/OMPL；`ready` 和 `handover_ready` 将左右 TCP 作为 `both_arms` 的同一个规划目标。切换同时作用于选中点回放和完整 Demo，流程运行期间锁定。展示、撤离和放置的原有 TCP/笛卡尔逻辑不变。
 - 将桌面、桌腿和支撑加入规划场景。默认 `show_workpiece_in_rviz: false`，零件只保留尺寸、TCP 偏移和持有者参数，不发布成 RViz/MoveIt 碰撞体；双臂、夹爪、桌面与支架之间的碰撞检测保持开启。
 - 反馈缺失/过期、规划失败、轨迹不完整、执行错误、目标未到位、取消都会中止后续步骤。停止不主动松开夹爪。
-- 保留 `perception.py`，新增 `/grasp/perception/grasp_tcp` 位姿候选接口；当前无需相机。
+- 右腕 D405 PointCloud2 是右手抓取位姿唯一来源；识别 ROI 与圆柱尺寸在 `demo.yaml`，不得回退到手工接近点。
 
 本次在 Windows 进行了 Python 编译检查、离线行为测试、模型回归和 Tk 界面构造测试。**没有在本机执行 ROS 2 编译、MoveIt 在线规划、厂商 SDK 联调或实机运动验收。** mock 模式只模拟反馈与执行，不模拟真实夹持、摩擦或掉件。
 
@@ -88,15 +88,15 @@ ros2 launch fr3_dual_arm_grasp grasp.launch.py enable_execution:=false
 
 完整 Demo 抓取时发送完全闭合目标；TG-9801 由 `hardware.yaml` 的 10 N 限力停止，ROS 夹爪控制器允许因零件稳定堵转。程序随后读取实际总开度，只有连续稳定且位于 `demo.yaml` 的允许范围才继续。手动夹爪测试和张开动作仍可使用界面的目标闭合百分比。
 
-## 5. 采集 3 个核心点
+## 5. 采集 2 个核心点
 
 1. `ready`：双臂空手就绪，双夹爪张开；也用于流程结束后的回位。
-2. `right_pregrasp`：右手位于零件上方的预夹取位姿。程序从这个点复制 x/y，把 z 改为桌面上方 15 mm，并将 TCP 轴调整为竖直向下，自动生成 `right_grasp`。
-3. `left_place`：左手放置位姿。程序自动生成放置上方点、下降和放置后的抬升路径。
+2. `left_place`：左手放置位姿。程序自动生成放置上方点、下降和放置后的抬升路径。
+右腕 D405 在右盒 ROI 中连续识别稳定竖直圆柱，按配置尺寸估计圆柱中心；程序据此生成竖直抓取 TCP 和上方接近位姿。点云、TF、圆柱尺寸或 ROI 任一项无效时流程停止，不从示教点推测抓取位置。
 
 展示点由头部相机光轴中心和 30 cm 距离自动生成；交接预备间距由 `handover_separation_m` 给出，左手接取时再从预备位伸进到 `handover_grip_separation_m`（默认 10 mm，沿交接轴偏向左手一侧，让两副手指交错夹住零件而不相撞），并根据右手实时 TCP 动态对齐。旧文件中的 `right_grasp`、`right_display`、`handover_ready`、`left_receive` 会被保留读取但不再要求重新采集。
 
-交接后右手沿自身 TCP 的负 Z 方向撤离 `retreat_distance_m`（默认 6 cm），再回到就绪点；放置点用 `left_place` 的 x/y，z 取桌面上方 `grasp_clearance_m`（默认 15 mm，与右手取件一致）并把夹爪调竖直（镜像右手的取件动作），随后直线 MoveL 下降、放下后直线抬升。参数在 demo.yaml 中，方向必须符合现场夹持几何；路径不通会停止。夹爪不会跟随展示点开合：右手释放使用 right_pregrasp 的开度，左手张开/释放使用 ready 的开度。
+交接后右手沿自身 TCP 的负 Z 方向撤离 `retreat_distance_m`（默认 6 cm），再回到就绪点；放置点用 `left_place` 的 x/y，z 取桌面上方 `grasp_clearance_m`（默认 15 mm，与右手取件一致）并把夹爪调竖直（镜像右手的取件动作），随后直线 MoveL 下降、放下后直线抬升。参数在 demo.yaml 中，方向必须符合现场夹持几何；路径不通会停止。夹爪不会跟随展示点开合：右手释放使用 ready 的开度，左手张开/释放使用 ready 的开度。
 
 ### 展示方式和相机位置
 
@@ -126,7 +126,7 @@ ros2 launch fr3_dual_arm_grasp grasp.launch.py enable_execution:=false
 nano src/fr3_dual_arm_grasp/config/demo.yaml
 ```
 
-当前 demo 的零件是竖直圆柱，高 35 mm、直径 16 mm：
+当前 demo 的零件是竖直圆柱，高 35 mm、直径 16 mm。Gazebo 桌面上有左右两个 3×4 分格碰撞盒；右盒每格放一件圆柱，左盒为空。所有盒壁、隔板和圆柱都同步加入 MoveIt 碰撞场景。桌面右侧分格盒每格放一件，左侧分格盒为空。所有隔板和圆柱都在 Gazebo 与 MoveIt 场景中有碰撞几何：
 
 ```yaml
 workpiece:
@@ -182,21 +182,21 @@ workpiece:
 | 步骤 | 状态文字 | 动作及内部处理 |
 |---:|---|---|
 | 1 | `move both ready` | 左右臂同时回到 `ready`。关节模式使用保存的双臂关节角；TCP 模式把两个 TCP 作为 `both_arms` 目标。OMPL 检查双臂互撞、桌面和支撑碰撞。 |
-| 2 | `grip right right_pregrasp` | 右夹爪张开到 `right_pregrasp` 保存的开度，为抓取留出空间。 |
+| 2 | `grip right ready` | 右夹爪张开至就绪点保存的开度。 |
 | 3 | `grip left ready` | 左夹爪张开到 `ready` 保存的开度，避免交接前处于未知状态。 |
-| 4 | `move right right_pregrasp` | 右臂用 OMPL 到达抓取接近点，左臂保持不动但仍参与全机器人碰撞检查。 |
+| 4 | `perceive right` | 等待右腕相机连续识别右盒内圆柱，创建对应碰撞目标并由相机位姿生成抓取目标。 |
 | 5 | `orient right right_orient` | 右臂在接近点用关节空间把夹爪姿态调整为竖直向下，为直线下降做准备。 |
 | 6 | `approach right right_grasp` | 右手沿 TCP 直线 MoveL 竖直下降到桌面上方 15 mm 的抓取点（姿态已竖直，纯平移路径可靠完成）。 |
 | 7 | `grasp right right_grasp` | 右夹爪闭合至两爪间只剩 15 mm（`grasp_gap_m`），读取主指反馈换算总开度；连续 5 次变化不超过 0.5 mm 且落在配置范围才认为成功。 |
-| 8 | `attach right` | 软件状态把零件持有者记录为右手，并保存 TCP 到零件的相对变换。默认不向 RViz 发布零件碰撞体。 |
-| 9 | `lift right right_pregrasp` | 右手带件抬升回 `right_pregrasp`（关节空间），形成可控抬升。 |
+| 8 | `attach right` | 将感知选中的圆柱从分格盒碰撞场景转换为附着于右手的碰撞体，并保存 TCP 到零件的相对变换。 |
+| 9 | `lift right right_lift` | 右手从点云抓取位姿沿世界 +Z 抬升。 |
 | 10 | `scan right right_display` | 右手先到光轴前方 0.30 m 的展示位，再让关节 6 转 -180°，绕 X 轴 ±30°，最后把零件 +Z 轴直接正对相机展示底部。 |
 | 11 | `move both handover_ready` | 右手先到交接预备位、再左手依次到达（不一起动）；右手停在 -Y 侧、左手停在 +Y 侧，两夹爪 Z 轴共线沿 world Y 对指，且绕 Z 轴相差 90°，两臂不交叉、手指不相撞。 |
-| 12 | `touch left` | 若启用零件碰撞体，临时允许左右手指与零件接触；默认隐藏零件时仅更新流程接触状态。 |
+| 12 | `touch left` | 左右手交接时临时允许对应手指与已附着圆柱接触；分格盒、隔板和其余圆柱仍参与碰撞检查。 |
 | 13 | `receive left left_receive` | 左手从预备位伸进到 `handover_grip_separation_m`（默认 10 mm，偏向左手一侧），并读取右手实时 TCP 自动修正中心线。修正目标通过左臂 IK、OMPL 和碰撞检测后执行，右臂保持不动。 |
 | 14 | `grasp left left_receive` | 到位后复核中心线横向误差 ≤10 mm、角度误差 ≤5°；通过后左夹爪闭合至 15 mm 并按实际开度自动确认，避免与右手夹爪相撞。失败时右手继续夹持。 |
 | 15 | `transfer left` | 只有左夹爪确认成功后，软件持有者才从右手切换为左手。 |
-| 16 | `grip right right_pregrasp` | 右夹爪张开到预抓取点保存的开度，正式释放零件。 |
+| 16 | `grip right ready` | 右夹爪张开到就绪点保存的开度，正式释放零件。 |
 | 17 | `retreat right` | 右手沿自身 TCP 负 Z 方向直线撤离 `retreat_distance_m`，避免撤离时扫过左夹爪。 |
 | 18 | `touch_only left` | 接触状态收紧为只允许左手持有零件。 |
 | 19 | `move right ready` | 右臂用 OMPL 回到安全就绪位，左手继续持件。 |
@@ -221,10 +221,10 @@ workpiece:
 
 ## 8. 相机与未来感知
 
-- `config/scene.yaml`：只保留头部相机。
-- `config/scene.full_cameras.yaml`：原头部、胸/腰部 `waist_camera` 和双腕 `d435i` 完整备份。
-- 恢复时传 `scene:=.../scene.full_cameras.yaml`。相机碰撞体随配置恢复，不改双臂、夹爪或支架。RViz 保留头部图像/点云显示；实机相机驱动不由本 demo 启动，没有相机不会阻止示教流程。
-- 候选话题 `/grasp/perception/grasp_tcp` 类型 `geometry_msgs/PoseStamped`，要求 frame=`world`、有效四元数、当前 ROS 时间戳。上游先完成相机外参变换、零件位姿到右手 TCP 的抓取偏移换算。
+- `config/scene.yaml`：默认启用头部相机和左右腕部 RealSense D405。
+- `config/scene.full_cameras.yaml`：头部、胸/腰部 `waist_camera` 和双腕 D405 完整配置。
+- 恢复时传 `scene:=.../scene.full_cameras.yaml`。相机碰撞体随配置恢复，不改双臂、夹爪或支架。RViz 保留头部图像/点云显示；实机可传 `wrist_cameras:=true left_serial:=... right_serial:=...` 启动双腕相机；默认不启动 USB 驱动。参见 [D405 接口](D405_CAMERAS.md)。
+- 相机订阅 `/right_d405/points`。点云经 TF 变换到 `world`，按右盒 ROI、圆柱高度/半径聚类，并需连续稳定帧后才锁定目标；ROI、安装 TF 或尺寸不匹配时流程停止。
 - 消息只缓存在候选区，不触发运动。界面按钮可把 2 秒内的候选填入右手 TCP 输入框，先规划，执行定位后重新采集抓取/接近等关联点。当前完整 demo 仍只使用示教文件，不自动重算点云抓取轨迹。
 - `perception.py` 原有点云估计函数保留，尚未接入完整闭环识别或自动抓取重试。
 

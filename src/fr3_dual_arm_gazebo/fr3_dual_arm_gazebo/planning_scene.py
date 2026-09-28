@@ -9,7 +9,7 @@ from moveit_msgs.msg import CollisionObject
 from moveit_msgs.srv import ApplyPlanningScene
 from shape_msgs.msg import SolidPrimitive
 
-from fr3_dual_arm_gazebo.world_builder import load_scene, table_boxes
+from fr3_dual_arm_gazebo.world_builder import load_scene, table_boxes, part_poses
 
 
 def main(args=None):
@@ -42,10 +42,19 @@ def main(args=None):
         obj.primitives = [primitive]
         obj.primitive_poses = [pose]
         request.scene.world.collision_objects.append(obj)
+    part=scene.get('part', {})
+    if part:
+        for name,xyz in part_poses(scene):
+            obj=CollisionObject(); obj.header.frame_id='world'; obj.id=name; obj.operation=CollisionObject.ADD
+            primitive=SolidPrimitive(); primitive.type=SolidPrimitive.CYLINDER
+            primitive.dimensions=[float(part['height_m']),float(part['radius_m'])]
+            pose=Pose(); pose.position.x,pose.position.y,pose.position.z=map(float,xyz);pose.orientation.w=1.0
+            obj.primitives=[primitive];obj.primitive_poses=[pose]
+            request.scene.world.collision_objects.append(obj)
     future = client.call_async(request)
     rclpy.spin_until_future_complete(node, future, timeout_sec=30.0)
     if not future.done() or not future.result().success:
         node.get_logger().error('MoveIt did not acknowledge the static scene')
         return 1
-    node.get_logger().info('Published tabletop and legs to MoveIt planning scene')
+    node.get_logger().info('Published table, gridded bins and cylindrical parts to MoveIt planning scene')
     return 0

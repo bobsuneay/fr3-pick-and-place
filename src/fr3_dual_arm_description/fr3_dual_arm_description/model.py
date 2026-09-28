@@ -209,8 +209,9 @@ def add_camera(root, name, parent, cfg, depth, bracket_xyz, bracket_size):
     fixed(root, name + '_bracket_joint', parent, name + '_bracket', bracket_xyz)
 
     link = element(root, 'link', name=name + '_link')
-    camera_size = (0.025, 0.090, 0.025)
-    inertial(link, 0.075, camera_size)
+    # Camera +X is forward: D405 depth x width x height, metres.
+    camera_size = tuple(cfg.get('size', (0.025, 0.090, 0.025)))
+    inertial(link, cfg.get('mass', 0.075), camera_size)
     box(link, camera_size, visual=True)
     box(link, camera_size)
     offset = [a - b for a, b in zip(cfg['xyz'], bracket_xyz)]
@@ -349,11 +350,12 @@ def build_model(share, scene_path, arms, mode='gazebo', controller_file='', hard
         fixed(root, p + 'base_mount', 'support_link', p + 'base_link',
               arms[side]['xyz'], arms[side]['rpy'])
         add_gripper(root, side, arms)
-        camera_name = side + '_d435i'
+        camera_name = side + '_d405'
         wrist_camera = scene.get('cameras', {}).get(camera_name)
         if wrist_camera:
             add_camera(root, camera_name, wrist_camera['parent'], wrist_camera,
-                       wrist_camera.get('depth', True), (0, 0.055, 0.020),
+                       wrist_camera.get('depth', True),
+                       (0, 0.055, wrist_camera['xyz'][2]),
                        (0.015, 0.050, 0.015))
         for joint_name in (p + 'wrist_to_tool', p + 'tool_to_gripper', p + 'palm_to_tcp'):
             gazebo = element(root, 'gazebo', reference=joint_name)
@@ -376,6 +378,21 @@ def build_model(share, scene_path, arms, mode='gazebo', controller_file='', hard
         initial[f'{side}_right_finger_joint'] = arms['gripper']['open_gap'] / 2
 
     if mode == 'gazebo':
+        # Controllers activate only after physics starts. Keep the robot's
+        # powered joints at their spawn pose during that startup interval;
+        # scene objects retain normal gravity and collision physics.
+        gazebo_links = {
+            node.get('reference'): node for node in root.findall('gazebo')
+            if node.get('reference')
+        }
+        for link in root.findall('link'):
+            name = link.get('name', '')
+            if name.startswith(('left_', 'right_')):
+                gazebo_link = gazebo_links.get(name)
+                if gazebo_link is None:
+                    gazebo_link = element(root, 'gazebo', reference=name)
+                element(gazebo_link, 'gravity').text = 'false'
+
         # A single GazeboSystem exposes both arms and avoids duplicate
         # ros2_control parameters that Humble complains about with two blocks.
         system = control(root, 'gazebo_system', 'gazebo_ros2_control/GazeboSystem',
@@ -452,9 +469,9 @@ def semantic(root, arms):
                 link2=side + '_base_link', reason='Mounting')
         element(srdf, 'disable_collisions', link1=side + '_left_finger',
                 link2=side + '_right_finger', reason='Finger pads')
-        if root.find(f"link[@name='{side}_d435i_link']") is not None:
+        if root.find(f"link[@name='{side}_d405_link']") is not None:
             element(srdf, 'disable_collisions', link1=side + '_gripper_palm',
-                    link2=side + '_d435i_link', reason='Wrist camera mount')
+                    link2=side + '_d405_link', reason='Wrist camera mount')
     for link1, link2 in (('support_link', 'head_camera_bracket'),
                          ('head_camera_bracket', 'head_camera_link'),
                          ('support_link', 'head_camera_link')):
@@ -489,27 +506,40 @@ def controllers(mode='gazebo', side=None):
         params = {'update_rate': 125, 'use_sim_time': False}
     result = {manager: {'ros__parameters': params}}
     sides = SIDES if side is None else (side,)
+    if mode == 'gazebo':
+        # Gazebo has one controller manager for both arms.  A single broadcaster
+        # publishes one atomic 14-joint snapshot; two publishers on the same
+        # /joint_states topic can leave one arm stale at a workflow boundary.
+        name = 'joint_state_broadcaster'
+        result[manager]['ros__parameters'][name] = {
+            'type': 'joint_state_broadcaster/JointStateBroadcaster'}
+        result[name] = {'ros__parameters': {
+            'joints': [joint for arm in sides
+                       for joint in ([f'{arm}_j{i}' for i in range(1, 7)]
+                                     + [f'{arm}_left_finger_joint'])],
+            'interfaces': ['position'],
+            'use_local_topics': False,
+        }}
     for arm in sides:
-        names = (arm + '_joint_state_broadcaster', arm + '_arm_controller',
-                 arm + '_gripper_controller')
+        names = (arm + '_arm_controller', arm + '_gripper_controller')
         gripper_kind = 'position_controllers/GripperActionController'
         gripper_joints = [f'{arm}_left_finger_joint']
+        if mode != 'gazebo':
+            broadcaster = arm + '_joint_state_broadcaster'
+            result[manager]['ros__parameters'][broadcaster] = {
+                'type': 'joint_state_broadcaster/JointStateBroadcaster'}
+            result[broadcaster] = {'ros__parameters': {
+                'joints': [f'{arm}_j{i}' for i in range(1, 7)] + gripper_joints,
+                'interfaces': ['position'], 'use_local_topics': True}}
         for name, kind in zip(names, (
-                'joint_state_broadcaster/JointStateBroadcaster',
-                'joint_trajectory_controller/JointTrajectoryController',
-                gripper_kind)):
+                'joint_trajectory_controller/JointTrajectoryController', gripper_kind)):
             result[manager]['ros__parameters'][name] = {'type': kind}
         result[names[0]] = {'ros__parameters': {
-            'joints': [f'{arm}_j{i}' for i in range(1, 7)] + gripper_joints,
-            # mock/real use separate managers. Keep their output private and
-            # merge it once so RViz, MoveIt and the UI share one complete feed.
-            'interfaces': ['position'], 'use_local_topics': mode != 'gazebo'}}
-        result[names[1]] = {'ros__parameters': {
             'joints': [f'{arm}_j{i}' for i in range(1, 7)],
             'command_interfaces': ['position'], 'state_interfaces': ['position'],
             'allow_partial_joints_goal': False, 'state_publish_rate': 50.0,
             'constraints': {'goal_time': 2.0, 'stopped_velocity_tolerance': 0.05}}}
-        result[names[2]] = {'ros__parameters': {
+        result[names[1]] = {'ros__parameters': {
             'joint': f'{arm}_left_finger_joint', 'goal_tolerance': 0.0005,
             'max_effort': 0.0, 'allow_stalling': True,
             'stall_velocity_threshold': 0.0001, 'stall_timeout': 1.0}}
@@ -552,10 +582,10 @@ def moveit_config(root, arms, mode='gazebo'):
     limits = {}
     for joint in root.findall('joint'):
         if joint.get('type') in ('revolute', 'prismatic') and joint.find('mimic') is None:
-            velocity = min(float(joint.find('limit').get('velocity')), 0.3)
+            velocity = min(float(joint.find('limit').get('velocity')), 3.1415)
             limits[joint.get('name')] = {
                 'has_velocity_limits': True, 'max_velocity': velocity,
-                'has_acceleration_limits': True, 'max_acceleration': 0.3}
+                'has_acceleration_limits': True, 'max_acceleration': 1.0}
     return {
         'robot_description_semantic': semantic(root, arms),
         'robot_description_kinematics': kinematics,

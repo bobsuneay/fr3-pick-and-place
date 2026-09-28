@@ -75,8 +75,22 @@ class DualArmMoveIt:
         return result
 
     def service(self, client, request):
-        if not client.wait_for_service(timeout_sec=3.0):
-            raise RuntimeError('Required MoveIt service unavailable')
+        # Gazebo starts move_group after both arm and gripper controllers.
+        # The UI can already be open while its services are still starting.
+        name = client.srv_name
+        deadline = time.monotonic() + 60.0
+        logged = False
+        while True:
+            if self.stop.is_set():
+                raise RuntimeError('Cancelled')
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError(f'MoveIt service {name} unavailable after 60 s; check move_group')
+            if client.wait_for_service(timeout_sec=min(1.0, remaining)):
+                break
+            if not logged:
+                self.node.get_logger().info(f'Waiting for MoveIt service {name}')
+                logged = True
         if self.stop.is_set():
             raise RuntimeError('Cancelled')
         return self.wait(client.call_async(request))

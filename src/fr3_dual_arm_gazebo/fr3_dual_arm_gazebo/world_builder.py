@@ -37,8 +37,42 @@ def table_boxes(scene):
             result.append((
                 f'table_leg_{i}_{j}', [leg, leg, top - thick],
                 [x + sign_x * (sx / 2 - leg), y + sign_y * (sy / 2 - leg), (top - thick) / 2]))
+    return result + bin_boxes(scene)
+
+
+
+def bin_boxes(scene):
+    """Return collision/visual cuboids for the two gridded parts trays."""
+    result=[]
+    bins=scene.get('bins', {})
+    for side, cfg in bins.items():
+        cx,cy=cfg['center_xy']; rows,cols=cfg['rows'],cfg['cols']
+        pitch=cfg['cell_pitch']; wall=cfg['wall_thickness']; floor=cfg['floor_thickness']
+        outer_x=cols*pitch+2*wall; outer_y=rows*pitch+2*wall
+        z0=scene['table']['top_z']
+        height=cfg['wall_height']
+        result.append((f'{side}_bin_floor',[outer_x,outer_y,floor],[cx,cy,z0+floor/2]))
+        for ysign in (-1,1):
+            result.append((f'{side}_bin_wall_y_{ysign}',[outer_x,wall,height],[cx,cy+ysign*(outer_y-wall)/2,z0+height/2]))
+        for xsign in (-1,1):
+            result.append((f'{side}_bin_wall_x_{xsign}',[wall,outer_y-2*wall,height],[cx+xsign*(outer_x-wall)/2,cy,z0+height/2]))
+        for col in range(1,cols):
+            x=cx+(col-cols/2)*pitch
+            result.append((f'{side}_bin_div_x_{col}',[wall,rows*pitch,height],[x,cy,z0+height/2]))
+        for row in range(1,rows):
+            y=cy+(row-rows/2)*pitch
+            result.append((f'{side}_bin_div_y_{row}',[cols*pitch,wall,height],[cx,y,z0+height/2]))
     return result
 
+
+def part_poses(scene):
+    cfg=scene.get('bins',{}).get('right',{})
+    part=scene.get('part',{})
+    if not cfg or not part: return []
+    cx,cy=cfg['center_xy']; rows,cols=cfg['rows'],cfg['cols']; pitch=cfg['cell_pitch']
+    z=scene['table']['top_z']+cfg['floor_thickness']+part['height_m']/2+cfg.get('part_clearance_m',.001)
+    return [(f"right_part_{r:02d}_{c:02d}",[cx+(c-(cols-1)/2)*pitch,cy+(r-(rows-1)/2)*pitch,z])
+            for r in range(rows) for c in range(cols)]
 
 def bolt_poses(scene):
     b = scene['bolts']
@@ -168,7 +202,9 @@ def world_xml(scene):
         geometry(visual, 'box', size)
         appearance(visual, [0.56, 0.38, 0.23, 1] if name == 'table_top' else [0.3, 0.32, 0.35, 1])
 
-    b = scene['bolts']
+
+
+    b = scene.get('bolts', {'length': .045, 'head_length': .008, 'shaft_radius': .006, 'head_radius': .009, 'density': 7850.0})
     mass, com, transverse, axial = bolt_inertia(b)
     template = ET.Element('model', name='bolt')
     element(template, 'static', 'false')
@@ -196,11 +232,23 @@ def world_xml(scene):
         geometry(visual, 'cylinder', [radius, length])
         appearance(visual, [0.65, 0.69, 0.73, 1])
 
-    for name, position in bolt_poses(scene):
-        model = deepcopy(template)
-        model.set('name', name)
-        element(model, 'pose', position + [0, math.pi / 2, 0])
-        world.append(model)
+    if 'bins' in scene:
+        part=scene['part']; radius=float(part['radius_m']); height=float(part['height_m'])
+        part_mass=float(part.get('mass_kg',.025)); inertia_z=.5*part_mass*radius**2
+        inertia_xy=part_mass*(3*radius**2+height**2)/12
+        for name,position in part_poses(scene):
+            model=ET.Element('model',name=name)
+            element(model,'static','false'); link=element(model,'link',name='body')
+            inertial=element(link,'inertial'); element(inertial,'mass',part_mass)
+            tensor=element(inertial,'inertia')
+            for key,value in dict(ixx=inertia_xy,iyy=inertia_xy,izz=inertia_z,ixy=0,ixz=0,iyz=0).items(): element(tensor,key,value)
+            collision=element(link,'collision',name='cylinder_collision'); geometry(collision,'cylinder',[radius,height]); contact(collision,1.2)
+            visual=element(link,'visual',name='cylinder_visual'); geometry(visual,'cylinder',[radius,height]); appearance(visual,[.78,.80,.84,1])
+            element(model,'pose',position+[0,0,0]); world.append(model)
+    else:
+        for name, position in bolt_poses(scene):
+            model=deepcopy(template); model.set('name',name)
+            element(model,'pose',position+[0,math.pi/2,0]); world.append(model)
 
     ET.indent(sdf, space='  ')
     return ET.tostring(sdf, encoding='unicode', xml_declaration=True)

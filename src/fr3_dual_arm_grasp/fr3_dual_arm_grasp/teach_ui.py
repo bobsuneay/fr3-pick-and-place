@@ -126,7 +126,6 @@ class TeachUI:
         teaching.pack(fill='x')
         self.button(teaching, '进入拖动示教', lambda: self.submit('进入拖动示教', lambda: self.app.set_teach_mode(True)))
         self.button(teaching, '恢复运动控制', lambda: self.submit('恢复运动控制', lambda: self.app.set_teach_mode(False)))
-        self.button(manual, '加载感知候选到输入框（不运动）', self.use_candidate)
 
         files = ttk.Frame(teach)
         files.pack(fill='x')
@@ -136,7 +135,7 @@ class TeachUI:
         tree_frame = ttk.Frame(teach)
         tree_frame.pack(fill='both', expand=True, pady=6)
         self.tree = ttk.Treeview(tree_frame, columns=('name', 'saved'), show='headings', selectmode='browse', height=7)
-        self.tree.heading('name', text='3 个核心示教点（其余运行时自动生成）')
+        self.tree.heading('name', text='2 个示教点（抓取由点云生成）')
         self.tree.heading('saved', text='状态')
         self.tree.column('name', width=410)
         self.tree.column('saved', width=90)
@@ -161,7 +160,7 @@ class TeachUI:
         ttk.Label(row, text='选中点 / 当前手臂的夹持目标：闭合 %').pack(side='left')
         ttk.Entry(row, textvariable=self.saved_gap, width=8).pack(side='left')
         self.button(row, '只保存开度', self.edit_gap)
-        ttk.Label(teach, text='仅采集 ready、right_pregrasp、left_place。\n抓取点自动取预夹取点 x/y，桌面上方 10 mm 且 TCP 竖直；展示点由头部相机前 30 cm 自动生成；交接位姿按配置中心和夹爪间距自动生成。\n原始关节与 TCP 均来自同一次双臂反馈快照，保存单位为 rad / m / 四元数。').pack(anchor='w', pady=6)
+        ttk.Label(teach, text='仅采集 ready、left_place。右手抓取与接近位姿完全由右腕 D405 点云识别右盒圆柱后生成；无法识别时流程停止，不使用示教点猜测抓取位置。\n展示点仍由头部相机自动生成，交接位姿仍按原配置生成。采集数据来自同一双臂反馈快照，单位为 rad / m / 四元数。').pack(anchor='w', pady=6)
         actions = ttk.Frame(self.root, padding=10)
         actions.pack(fill='x')
         self.button(actions, '检查示教点完整性', lambda: self.submit('检查示教点', self.app.book.validate_complete))
@@ -248,17 +247,6 @@ class TeachUI:
         angles = Rotation.from_quat(pose[3:]).as_euler('xyz', degrees=True).tolist()
         for variable, value in zip(self.tcp, xyz + angles):
             variable.set(f'{value:.3f}')
-
-    def use_candidate(self):
-        candidate = self.app.perception_candidate
-        if candidate is None:
-            raise ValueError('尚无 /grasp/perception/grasp_tcp 候选')
-        stamp = candidate['stamp_sec'] + candidate['stamp_nanosec']*1e-9
-        age = self.app.get_clock().now().nanoseconds*1e-9 - stamp
-        if not 0 <= age <= 2:
-            raise ValueError('感知候选超过 2 秒或时间戳无效')
-        self.side.set('right')
-        self.fill_pose(candidate['tcp'])
 
     def show_point(self):
         name = self.selected()

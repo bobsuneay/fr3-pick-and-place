@@ -197,3 +197,29 @@ def test_free_pose_uses_ik_joint_planning(motion, execute):
     motion.cartesian = lambda *args: pytest.fail('Free path must use joint planning')
     motion.pose('right', target, execute)
     assert calls == [(solution, 'right_arm', execute)]
+
+
+def test_service_waits_for_late_moveit_startup(motion):
+    attempts = []
+    logger = SimpleNamespace(info=lambda message: attempts.append(message))
+    motion.node = SimpleNamespace(get_logger=lambda: logger)
+    response = object()
+    endpoint = SimpleNamespace(
+        srv_name='/get_planning_scene',
+        wait_for_service=lambda timeout_sec: len(attempts) > 0,
+        call_async=lambda request: completed(response),
+    )
+    assert motion.service(endpoint, object()) is response
+    assert attempts == ['Waiting for MoveIt service /get_planning_scene']
+
+
+def test_service_wait_can_be_cancelled(motion):
+    endpoint = SimpleNamespace(srv_name='/get_planning_scene')
+    def wait_for_service(timeout_sec):
+        motion.stop.set()
+        return False
+    endpoint.wait_for_service = wait_for_service
+    endpoint.call_async = lambda request: pytest.fail('Cancelled service dispatched')
+    motion.node = SimpleNamespace(get_logger=lambda: SimpleNamespace(info=lambda message: None))
+    with pytest.raises(RuntimeError, match='Cancelled'):
+        motion.service(endpoint, object())

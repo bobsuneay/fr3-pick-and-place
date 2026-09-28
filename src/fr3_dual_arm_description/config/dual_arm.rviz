@@ -53,6 +53,57 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Depth: 5
+    - Class: rviz_default_plugins/Image
+      Name: Left Wrist RGB
+      Enabled: true
+      Topic:
+        Value: /left_d405/image_raw
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 2
+    - Class: rviz_default_plugins/Image
+      Name: Right Wrist RGB
+      Enabled: true
+      Topic:
+        Value: /right_d405/image_raw
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 2
+    - Class: rviz_default_plugins/Image
+      Name: Left Wrist Depth
+      Enabled: false
+      Normalize Range: true
+      Topic:
+        Value: /left_d405/depth/image_raw
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 2
+    - Class: rviz_default_plugins/Image
+      Name: Right Wrist Depth
+      Enabled: false
+      Normalize Range: true
+      Topic:
+        Value: /right_d405/depth/image_raw
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 2
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Right Wrist PointCloud
+      Enabled: true
+      Topic:
+        Value: /right_d405/points
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Depth: 2
+      Style: Points
+      Size (Pixels): 2
+      Color Transformer: RGB8
+      Position Transformer: XYZ
     - Class: rviz_default_plugins/TF
       Name: TF
       Enabled: false

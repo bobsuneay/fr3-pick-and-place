@@ -9,7 +9,7 @@ def run_workflow(app):
     app.motion.guard(True)
     if app.scene.owner or app.recovery_required:
         raise RuntimeError('Recover previous run before starting a new demo')
-    app.scene.place_initial(app.grasp_target())
+    app.scene.initialize()
     # Once a run begins, failure must never automatically restart at the first step.
     app.recovery_required = True
     steps = list(recipe())
@@ -19,6 +19,10 @@ def run_workflow(app):
         try:
             _run_step(app, kind, side, key)
         except Exception as exc:
+            if kind == 'perceive':
+                raise RuntimeError(
+                    '相机抓取识别失败，流程已停止；禁止跳过视觉确认继续抓取：'
+                    + str(exc)) from exc
             app._wait_skip_or_stop(f'{index}/{len(steps)} {kind} {side} {key}', exc)
     app.scene.allow([], table=True)
     app.recovery_required = False
@@ -26,7 +30,10 @@ def run_workflow(app):
 
 
 def _run_step(app, kind, side, key):
-    if kind in ('move', 'view', 'orient', 'approach', 'lift'):
+    if kind == 'perceive':
+        pose,target_id=app.wait_for_perception()
+        app.scene.place_initial(app.cloud_grasp_tcp(pose),target_id=target_id)
+    elif kind in ('move', 'view', 'orient', 'approach', 'lift'):
         if key == 'left_place':
             # Workpiece/table contact is intentional only for placement.
             app.scene.allow(['left'], table=True)

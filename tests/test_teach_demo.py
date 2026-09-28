@@ -212,24 +212,24 @@ def test_handover_failure_never_opens_donor(failure):
         run_workflow(app)
 
 
-def test_head_only_and_full_camera_backup_preserve_mechanical_calibration():
+def test_wrist_cameras_and_full_scene_preserve_mechanical_calibration():
     share = ROOT / 'src/fr3_dual_arm_description'
     arms = read_yaml(share / 'config/arms.yaml')
     current_scene = read_yaml(share / 'config/scene.yaml')
     full_scene = read_yaml(share / 'config/scene.full_cameras.yaml')
-    assert current_scene['cameras'] == {}
+    assert set(current_scene['cameras']) == {'left_d405', 'right_d405'}
     for key in current_scene.keys() - {'cameras'}:
         assert current_scene[key] == full_scene[key]
     current = build_model(share, share / 'config/scene.yaml', arms, mode='mock')
     full = build_model(share, share / 'config/scene.full_cameras.yaml', arms, mode='mock')
     assert current.find("link[@name='head_camera_link']") is not None
-    assert current.find("link[@name='left_d435i_link']") is None
+    assert current.find("link[@name='left_d405_link']") is not None
     assert current.find("link[@name='waist_camera_link']") is None
     import xml.etree.ElementTree as ET
     for joint in current.findall('joint'):
         name = joint.get('name')
         assert ET.tostring(joint) == ET.tostring(full.find(f"joint[@name='{name}']"))
-    assert 'left_d435i' not in semantic(current, arms)
+    assert 'left_d405' in semantic(current, arms)
 
 
 def test_fingerprint_tracks_scene_and_arms(tmp_path):

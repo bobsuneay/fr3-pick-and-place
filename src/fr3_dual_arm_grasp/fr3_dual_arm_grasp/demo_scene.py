@@ -6,7 +6,7 @@ from moveit_msgs.msg import (CollisionObject, AttachedCollisionObject,
                              PlanningSceneComponents, AllowedCollisionEntry)
 from moveit_msgs.srv import ApplyPlanningScene, GetPlanningScene
 from shape_msgs.msg import SolidPrimitive
-from fr3_dual_arm_gazebo.world_builder import table_boxes
+from fr3_dual_arm_gazebo.world_builder import table_boxes, part_poses
 from .motion import pose_msg
 
 
@@ -50,6 +50,7 @@ class DemoScene:
         self.shape = shape
         self.show_workpiece = bool(show_workpiece)
         self.owner, self.local_pose, self.world_pose = None, None, None
+        self.target_id = None
         self.touch_sides = []
         self.apply = node.create_client(ApplyPlanningScene, '/apply_planning_scene')
         self.get = node.create_client(GetPlanningScene, '/get_planning_scene')
@@ -73,6 +74,11 @@ class DemoScene:
         update = self.diff()
         for name, size, xyz in table_boxes(self.scene):
             update.scene.world.collision_objects.append(box_object(name, size, list(xyz) + [0, 0, 0, 1]))
+        part=self.scene.get('part', {})
+        for name,xyz in part_poses(self.scene):
+            update.scene.world.collision_objects.append(box_object(
+                name,[part['height_m'],2*part['radius_m'],2*part['radius_m']],
+                list(xyz)+[0,0,0,1],shape='cylinder'))
         self.commit(update)
         self.ready = True
 
@@ -82,7 +88,7 @@ class DemoScene:
         req = GetPlanningScene.Request()
         req.components.components = PlanningSceneComponents.ALLOWED_COLLISION_MATRIX
         acm = deepcopy(self.motion.service(self.get, req).scene.allowed_collision_matrix)
-        names = [self.OBJECT, 'table_top'] + finger_links('left') + finger_links('right')
+        names = [self.OBJECT, 'table_top', 'right_bin_floor', 'left_bin_floor'] + finger_links('left') + finger_links('right')
         for name in names:
             if name not in acm.entry_names:
                 acm.entry_names.append(name)
@@ -94,7 +100,7 @@ class DemoScene:
         object_index = acm.entry_names.index(self.OBJECT)
         allowed = {link for side in sides for link in finger_links(side)}
         if table:
-            allowed.add('table_top')
+            allowed.update(('table_top', 'right_bin_floor'))
         for index, name in enumerate(acm.entry_names):
             value = name in allowed
             acm.entry_values[object_index].enabled[index] = value
@@ -103,14 +109,19 @@ class DemoScene:
         update.scene.allowed_collision_matrix = acm
         self.commit(update)
 
-    def place_initial(self, grasp_pose):
+    def place_initial(self, grasp_pose, target_id=None):
         if not self.ready:
             self.initialize()
         self.world_pose = vector(matrix(grasp_pose) @ matrix(self.offset))
+        self.target_id = target_id
         if self.show_workpiece:
             self.allow(['right'], table=True)
             req = self.diff()
-            req.scene.world.collision_objects = [box_object(self.OBJECT, self.dimensions, self.world_pose, shape=self.shape)]
+            if target_id:
+                remove=CollisionObject();remove.id=target_id;remove.operation=CollisionObject.REMOVE
+                req.scene.world.collision_objects=[remove,box_object(self.OBJECT,self.dimensions,self.world_pose,shape=self.shape)]
+            else:
+                req.scene.world.collision_objects=[box_object(self.OBJECT,self.dimensions,self.world_pose,shape=self.shape)]
             self.commit(req)
 
     def current_world(self):
@@ -180,6 +191,9 @@ class DemoScene:
         old = CollisionObject()
         old.id, old.operation = self.OBJECT, CollisionObject.REMOVE
         req.scene.world.collision_objects.append(old)
+        if self.target_id and self.target_id != self.OBJECT:
+            target=CollisionObject();target.id=self.target_id;target.operation=CollisionObject.REMOVE
+            req.scene.world.collision_objects.append(target)
         self.commit(req)
         self.allow([])
         self.owner = self.local_pose = self.world_pose = None

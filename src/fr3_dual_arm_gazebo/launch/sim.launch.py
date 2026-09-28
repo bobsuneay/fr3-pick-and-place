@@ -21,9 +21,11 @@ import yaml
 from fr3_dual_arm_description.model import (
     SIDES, build_model, controllers, moveit_config, read_yaml)
 from fr3_dual_arm_gazebo.world_builder import load_scene, world_xml
+from fr3_dual_arm_gazebo.startup import require_free_gazebo_master
 
 
 def start(context):
+    require_free_gazebo_master()
     description_share = Path(get_package_share_directory('fr3_dual_arm_description'))
     arg = lambda name: LaunchConfiguration(name).perform(context)
 
@@ -101,16 +103,23 @@ def start(context):
         output='screen',
     )
 
-    spawners = []
+    spawners = [Node(
+        package='controller_manager',
+        executable='spawner',
+        prefix='/usr/bin/python3',
+        arguments=['joint_state_broadcaster', '-c', '/controller_manager',
+                   '--controller-manager-timeout', '120'],
+        output='screen',
+    )]
     for side in SIDES:
-        for suffix in ('joint_state_broadcaster', 'arm_controller', 'gripper_controller'):
+        for suffix in ('arm_controller', 'gripper_controller'):
             args = [
                 f'{side}_{suffix}',
                 '-c', '/controller_manager',
                 '--controller-manager-timeout', '120',
             ]
-            if suffix != 'joint_state_broadcaster' and not enable_execution:
-                args.append('--inactive')
+            # Controllers must hold the simulated joints even when MoveIt
+            # trajectory execution is disabled for inspection/teaching.
             spawners.append(Node(
                 package='controller_manager',
                 executable='spawner',
