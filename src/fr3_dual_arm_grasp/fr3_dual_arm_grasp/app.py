@@ -32,6 +32,7 @@ from .workflow import run_workflow
 from .display_geometry import matrix, vector, camera_neutral, object_path, display_views
 from .teaching import TeachingMode, robot_mode
 from .kinematics import build_kinematics
+from .latest_message import LatestMessageWorker
 from fr3_dual_arm_description.model import build_model
 
 
@@ -197,12 +198,17 @@ class DemoApp(Node):
         self.locked_cloud_pose = None
         self.locked_cloud_target_id = None
         self.cloud_error = '等待右腕相机点云'
-        self._last_cloud_process = 0.0
         self._stable_cloud_pose = None
         self._stable_cloud_count = 0
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.perception = config.get('perception', {})
+        # PointCloud2 conversion, TF and clustering are intentionally kept off
+        # the ROS executor thread.  The callback below only replaces one pending
+        # frame, so /joint_states cannot be starved and old clouds never queue.
+        self.cloud_worker = LatestMessageWorker(
+            self._process_point_cloud, min_interval=0.15,
+            on_error=self._point_cloud_error, name='right-d405-perception')
         self.create_subscription(PointCloud2, self.perception.get('cloud_topic', '/right_d405/points'),
                                  self.on_point_cloud, qos_profile_sensor_data)
         self.status_pub = self.create_publisher(String, '/grasp/status_text', 10)
@@ -312,52 +318,57 @@ class DemoApp(Node):
         self.publish('拖动示教已启用，可拖动后采集' if enabled else '运动控制已恢复')
 
     def on_point_cloud(self, msg):
-        now=time.monotonic()
-        if now-self._last_cloud_process < .15:
-            return
-        self._last_cloud_process=now
-        try:
-            data=point_cloud2.read_points(msg,field_names=('x','y','z'),skip_nans=True)
-            if isinstance(data,np.ndarray) and data.dtype.names:
-                points=np.column_stack([data[k].reshape(-1) for k in ('x','y','z')])
+        self.cloud_worker.submit(msg)
+
+    def _process_point_cloud(self, msg):
+        data=point_cloud2.read_points(msg,field_names=('x','y','z'),skip_nans=True)
+        if isinstance(data,np.ndarray) and data.dtype.names:
+            points=np.column_stack([data[k].reshape(-1) for k in ('x','y','z')])
+        else:
+            points=np.asarray(list(data),dtype=float).reshape(-1,3)
+        if msg.header.frame_id == 'world':
+            rotation=np.eye(3);translation=np.zeros(3)
+        else:
+            stamp=Time.from_msg(msg.header.stamp)
+            transform=self.tf_buffer.lookup_transform('world',msg.header.frame_id,stamp)
+            t=transform.transform.translation;q=transform.transform.rotation
+            translation=np.array([t.x,t.y,t.z])
+            rotation=Rotation.from_quat([q.x,q.y,q.z,q.w]).as_matrix()
+        world=points@rotation.T+translation
+        cfg=dict(self.perception)
+        cfg['height_m']=float(self.demo_config['workpiece']['height_m'])
+        cfg['radius_m']=float(self.demo_config['workpiece']['radius_m'])
+        cfg['preferred_xy']=self.perception.get('preferred_xy',[.5,-.48])
+        found=estimate_upright_cylinder(world,cfg)
+        # Stable row/column identity is assigned from the detected centre,
+        # while selection itself is made from observed camera points.
+        bin_cfg=self.scene.scene['bins']['right'];cx,cy=bin_cfg['center_xy'];pitch=bin_cfg['cell_pitch']
+        col=int(np.clip(round((found.pose[0,3]-cx)/pitch+(bin_cfg['cols']-1)/2),0,bin_cfg['cols']-1))
+        row=int(np.clip(round((found.pose[1,3]-cy)/pitch+(bin_cfg['rows']-1)/2),0,bin_cfg['rows']-1))
+        target_id=f'right_part_{row:02d}_{col:02d}'
+        with self.cloud_condition:
+            if self._stable_cloud_pose is not None and np.linalg.norm(found.pose[:3,3]-self._stable_cloud_pose[:3,3]) < .004:
+                self._stable_cloud_count += 1
             else:
-                points=np.asarray(list(data),dtype=float).reshape(-1,3)
-            if msg.header.frame_id == 'world':
-                rotation=np.eye(3);translation=np.zeros(3)
-            else:
-                stamp=Time.from_msg(msg.header.stamp)
-                transform=self.tf_buffer.lookup_transform('world',msg.header.frame_id,stamp)
-                t=transform.transform.translation;q=transform.transform.rotation
-                translation=np.array([t.x,t.y,t.z])
-                rotation=Rotation.from_quat([q.x,q.y,q.z,q.w]).as_matrix()
-            world=points@rotation.T+translation
-            cfg=dict(self.perception)
-            cfg['height_m']=float(self.demo_config['workpiece']['height_m'])
-            cfg['radius_m']=float(self.demo_config['workpiece']['radius_m'])
-            cfg['preferred_xy']=self.perception.get('preferred_xy',[.5,-.48])
-            found=estimate_upright_cylinder(world,cfg)
-            # Stable row/column identity is assigned from the detected centre,
-            # while selection itself is made from observed camera points.
-            bin_cfg=self.scene.scene['bins']['right'];cx,cy=bin_cfg['center_xy'];pitch=bin_cfg['cell_pitch']
-            col=int(np.clip(round((found.pose[0,3]-cx)/pitch+(bin_cfg['cols']-1)/2),0,bin_cfg['cols']-1))
-            row=int(np.clip(round((found.pose[1,3]-cy)/pitch+(bin_cfg['rows']-1)/2),0,bin_cfg['rows']-1))
-            target_id=f'right_part_{row:02d}_{col:02d}'
-            with self.cloud_condition:
-                if self._stable_cloud_pose is not None and np.linalg.norm(found.pose[:3,3]-self._stable_cloud_pose[:3,3]) < .004:
-                    self._stable_cloud_count += 1
-                else:
-                    self._stable_cloud_count=1
-                self._stable_cloud_pose=found.pose.copy()
-                if self._stable_cloud_count >= int(self.perception.get('stable_frames',3)):
-                    self.latest_cloud_pose=found.pose.copy()
-                    self.latest_cloud_stamp=time.monotonic()
-                    self.latest_cloud_target_id=target_id
-                    self.cloud_error=''
-                self.cloud_condition.notify_all()
-        except Exception as exc:
-            with self.cloud_condition:
-                self.cloud_error=str(exc)
-                self._stable_cloud_pose=None;self._stable_cloud_count=0
+                self._stable_cloud_count=1
+            self._stable_cloud_pose=found.pose.copy()
+            if self._stable_cloud_count >= int(self.perception.get('stable_frames',3)):
+                self.latest_cloud_pose=found.pose.copy()
+                self.latest_cloud_stamp=time.monotonic()
+                self.latest_cloud_target_id=target_id
+                self.cloud_error=''
+            self.cloud_condition.notify_all()
+
+    def _point_cloud_error(self, exc):
+        with self.cloud_condition:
+            self.cloud_error=str(exc)
+            self._stable_cloud_pose=None;self._stable_cloud_count=0
+            self.cloud_condition.notify_all()
+
+    def shutdown_cloud_worker(self):
+        worker = getattr(self, 'cloud_worker', None)
+        if worker is not None and not worker.close(timeout=5.0):
+            self.get_logger().warning('Point-cloud worker did not stop within 5 seconds')
 
     def require_cloud_pose(self):
         with self.cloud_lock:
@@ -888,6 +899,7 @@ def main():
         pass
     finally:
         node.motion.cancel()
+        node.shutdown_cloud_worker()
         if node.worker:
             # Keep callbacks spinning during cancellation acknowledgement.
             import time

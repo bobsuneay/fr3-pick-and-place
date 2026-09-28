@@ -322,6 +322,7 @@ def main():
         root.mainloop()
     finally:
         app.motion.cancel()
+        app.shutdown_cloud_worker()
         if app.worker:
             app.worker.join(timeout=6)
         if rclpy.ok():
