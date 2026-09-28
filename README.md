@@ -26,7 +26,7 @@ ros2 launch fr3_dual_arm_bringup pick_place.launch.py \
   mode:=real hardware:=$HOME/fr3_dual_arm.hardware.yaml enable_execution:=false
 ```
 
-完整 demo 前需采集 `ready`、`left_place` 两点，并核对 35×16 mm 圆柱、两侧分格盒、D405 视野及点云 ROI；右盒默认 3×4 格并全部装件。抓取 TCP 与接近路径完全由右腕点云检测右盒圆柱后生成。实机仍使用基础工程的厂商 SDK 与补丁，SDK 不随 Git 仓库上传，需从原工程复制。
+完整 demo 前需采集 `ready`、`left_place` 两点，并核对 35×16 mm 圆柱、左侧放置盒、D405 视野及点云 ROI。右侧默认只有一个直立圆柱，可在 UI 中以初始中心为圆心、半径 10 cm 随机摆放；原 3×4 右盒与 12 个零件保存在 `scene.grid_bins.backup.yaml`。抓取 TCP 与接近路径完全由右腕点云检测圆柱后生成。实机仍使用基础工程的厂商 SDK 与补丁，SDK 不随 Git 仓库上传，需从原工程复制。
 
 本次通过 Python 编译检查和离线测试（含 Tk 界面构造、流程失败/取消、标定与相机回归）。**尚未进行 ROS 2 在线运行及实机验收**，步骤见完整说明。
 

@@ -124,6 +124,15 @@ class DemoScene:
                 req.scene.world.collision_objects=[box_object(self.OBJECT,self.dimensions,self.world_pose,shape=self.shape)]
             self.commit(req)
 
+    def move_static_part(self, target_id, xyz):
+        """Move the unattached source object in the MoveIt world."""
+        if self.owner or self.target_id:
+            raise RuntimeError('Cannot randomize a workpiece owned by an active workflow')
+        req = self.diff()
+        req.scene.world.collision_objects = [box_object(
+            target_id, self.dimensions, list(xyz) + [0, 0, 0, 1], shape=self.shape)]
+        self.commit(req)
+
     def current_world(self):
         if self.owner:
             tcp = self.motion.tcp_poses()[self.owner]

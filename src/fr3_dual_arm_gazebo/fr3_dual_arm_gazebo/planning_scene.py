@@ -56,5 +56,5 @@ def main(args=None):
     if not future.done() or not future.result().success:
         node.get_logger().error('MoveIt did not acknowledge the static scene')
         return 1
-    node.get_logger().info('Published table, gridded bins and cylindrical parts to MoveIt planning scene')
+    node.get_logger().info('Published table, configured bins and pickup parts to MoveIt planning scene')
     return 0

@@ -1,30 +1,14 @@
+# Backup of the original two 3x4 gridded-bin scene.  Pass this file through
+# scene:=... to restore the previous right-bin and twelve-part layout.
 support:
-  size:
-  - 0.16
-  - 0.16
-  - 1.36
-  foot_size:
-  - 0.28
-  - 0.38
-  - 0.04
+  size: [0.16, 0.16, 1.36]
+  foot_size: [0.28, 0.38, 0.04]
 mount:
-  xyz:
-  - 0.0
-  - -0.1
-  - 1.1
-  rpy:
-  - 1.5707963267948966
-  - 0.0
-  - 0.0
+  xyz: [0.0, -0.1, 1.1]
+  rpy: [1.5707963267948966, 0.0, 0.0]
 camera:
-  xyz:
-  - 0.06
-  - 0.0
-  - 1.44
-  rpy:
-  - 0.0
-  - 0.7853981633974483
-  - 0.0
+  xyz: [0.06, 0.0, 1.44]
+  rpy: [0.0, 0.7853981633974483, 0.0]
   width: 1280
   height: 720
   horizontal_fov: 1.2217304764
@@ -32,17 +16,6 @@ camera:
   near: 0.05
   far: 3.0
 cameras:
-  waist_camera:
-    parent: support_link
-    xyz: [0.105, 0.0, 1.22]
-    rpy: [0.0, 0.401, 0.0]
-    width: 1280
-    height: 720
-    horizontal_fov: 1.211
-    near: 0.10
-    far: 2.0
-    rate: 10.0
-    depth: false
   left_d405:
     parent: left_gripper_palm
     xyz: [0.0, 0.080, 0.060]
@@ -72,21 +45,21 @@ cameras:
     rate: 30.0
     depth: true
 table:
-  center_xy:
-  - 0.48
-  - 0.0
-  size_xy:
-  - 0.7
-  - 2.0
+  center_xy: [0.48, 0.0]
+  size_xy: [0.7, 2.0]
   top_z: 0.75
   thickness: 0.04
   leg_width: 0.04
-pickup:
-  entity_name: right_part
-  center_xy: [0.50, -0.48]
-  random_radius_m: 0.10
-  spawn_clearance_m: 0.001
 bins:
+  right:
+    center_xy: [0.50, -0.48]
+    rows: 3
+    cols: 4
+    cell_pitch: 0.045
+    wall_thickness: 0.004
+    floor_thickness: 0.006
+    wall_height: 0.055
+    part_clearance_m: 0.001
   left:
     center_xy: [0.50, 0.48]
     rows: 3
@@ -95,12 +68,12 @@ bins:
     wall_thickness: 0.004
     floor_thickness: 0.006
     wall_height: 0.055
+    part_clearance_m: 0.001
 part:
   shape: cylinder
   radius_m: 0.008
   height_m: 0.035
   mass_kg: 0.025
-  # Initial centre for the standalone camera-guided pickup object.
   preferred_xy: [0.50, -0.48]
 physics:
   step_size: 0.001

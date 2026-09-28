@@ -160,10 +160,13 @@ class TeachUI:
         ttk.Label(row, text='选中点 / 当前手臂的夹持目标：闭合 %').pack(side='left')
         ttk.Entry(row, textvariable=self.saved_gap, width=8).pack(side='left')
         self.button(row, '只保存开度', self.edit_gap)
-        ttk.Label(teach, text='仅采集 ready、left_place。右手抓取与接近位姿完全由右腕 D405 点云识别右盒圆柱后生成；无法识别时流程停止，不使用示教点猜测抓取位置。\n展示点仍由头部相机自动生成，交接位姿仍按原配置生成。采集数据来自同一双臂反馈快照，单位为 rad / m / 四元数。').pack(anchor='w', pady=6)
+        ttk.Label(teach, text='仅采集 ready、left_place。右手抓取与接近位姿完全由右腕 D405 点云识别右侧独立圆柱后生成；无法识别时流程停止，不使用示教点猜测抓取位置。\n展示点仍由头部相机自动生成，交接位姿仍按原配置生成。采集数据来自同一双臂反馈快照，单位为 rad / m / 四元数。').pack(anchor='w', pady=6)
         actions = ttk.Frame(self.root, padding=10)
         actions.pack(fill='x')
         self.button(actions, '检查示教点完整性', lambda: self.submit('检查示教点', self.app.book.validate_complete))
+        self.randomize_button = self.button(
+            actions, '随机摆放右侧零件（半径 10 cm）',
+            lambda: self.submit('随机摆放右侧零件', self.app.randomize_workpiece))
         self.button(actions, '运行完整 DEMO', lambda: self.submit('启动完整 demo', self.app.start_demo))
         tk.Button(actions, text='停止流程 / 取消运动', bg='#ba2832', fg='white', command=self.app.motion.cancel).pack(side='left', padx=8)
         tk.Button(actions, text='跳过本步（IK 失败时）', bg='#d99a1c', fg='black',
@@ -295,7 +298,9 @@ class TeachUI:
         for key, label in SLOTS.items():
             self.tree.item(key, values=(label, '已采集' if key in self.app.book.points else '未采集'))
         for control in self.controls:
-            control.configure(state='disabled' if self.app.busy else 'normal')
+            unavailable = (control is self.randomize_button and
+                           getattr(self.app, 'mode', 'mock') != 'gazebo')
+            control.configure(state='disabled' if self.app.busy or unavailable else 'normal')
         self.show_point()
         self.root.after(200, self.refresh)
 

@@ -9,6 +9,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 from moveit_msgs.srv import GetPositionFK
 from controller_manager_msgs.srv import SwitchController, ListControllers
+from gazebo_msgs.srv import SetEntityState
 
 import rclpy
 from rclpy.node import Node
@@ -34,6 +35,7 @@ from .teaching import TeachingMode, robot_mode
 from .kinematics import build_kinematics
 from .latest_message import LatestMessageWorker
 from fr3_dual_arm_description.model import build_model
+from fr3_dual_arm_gazebo.world_builder import part_poses, random_pickup_xy
 
 
 class DemoApp(Node):
@@ -57,6 +59,8 @@ class DemoApp(Node):
         config = yaml.safe_load(Path(param('demo_config')).read_text(encoding='utf-8'))
         self.demo_config = config
         self.mode = param('mode')
+        self.set_entity = (self.create_client(SetEntityState, '/gazebo/set_entity_state')
+                           if self.mode == 'gazebo' else None)
         self.robot_ips = {}
         if self.mode == 'real':
             from fr3_dual_arm_description.model import validate_hardware
@@ -342,10 +346,14 @@ class DemoApp(Node):
         found=estimate_upright_cylinder(world,cfg)
         # Stable row/column identity is assigned from the detected centre,
         # while selection itself is made from observed camera points.
-        bin_cfg=self.scene.scene['bins']['right'];cx,cy=bin_cfg['center_xy'];pitch=bin_cfg['cell_pitch']
-        col=int(np.clip(round((found.pose[0,3]-cx)/pitch+(bin_cfg['cols']-1)/2),0,bin_cfg['cols']-1))
-        row=int(np.clip(round((found.pose[1,3]-cy)/pitch+(bin_cfg['rows']-1)/2),0,bin_cfg['rows']-1))
-        target_id=f'right_part_{row:02d}_{col:02d}'
+        pickup=self.scene.scene.get('pickup')
+        if pickup:
+            target_id=pickup.get('entity_name','right_part')
+        else:
+            bin_cfg=self.scene.scene['bins']['right'];cx,cy=bin_cfg['center_xy'];pitch=bin_cfg['cell_pitch']
+            col=int(np.clip(round((found.pose[0,3]-cx)/pitch+(bin_cfg['cols']-1)/2),0,bin_cfg['cols']-1))
+            row=int(np.clip(round((found.pose[1,3]-cy)/pitch+(bin_cfg['rows']-1)/2),0,bin_cfg['rows']-1))
+            target_id=f'right_part_{row:02d}_{col:02d}'
         with self.cloud_condition:
             if self._stable_cloud_pose is not None and np.linalg.norm(found.pose[:3,3]-self._stable_cloud_pose[:3,3]) < .004:
                 self._stable_cloud_count += 1
@@ -370,6 +378,36 @@ class DemoApp(Node):
         if worker is not None and not worker.close(timeout=5.0):
             self.get_logger().warning('Point-cloud worker did not stop within 5 seconds')
 
+    def randomize_workpiece(self):
+        if self.mode != 'gazebo' or self.set_entity is None:
+            raise RuntimeError('随机摆放仅用于 Gazebo 仿真')
+        if self.scene.owner or self.recovery_required:
+            raise RuntimeError('流程或恢复状态未清除，不能移动零件')
+        poses=part_poses(self.scene.scene)
+        if len(poses) != 1:
+            raise RuntimeError('随机摆放要求场景中恰好有一个独立零件')
+        name,xyz=poses[0]
+        x,y=random_pickup_xy(self.scene.scene)
+        xyz=[x,y,xyz[2]]
+        request=SetEntityState.Request()
+        request.state.name=name
+        request.state.reference_frame='world'
+        request.state.pose.position.x=x
+        request.state.pose.position.y=y
+        request.state.pose.position.z=xyz[2]
+        request.state.pose.orientation.w=1.0
+        response=self.motion.service(self.set_entity,request)
+        if not response.success:
+            raise RuntimeError('Gazebo 拒绝移动零件：'+response.status_message)
+        self.scene.move_static_part(name,xyz)
+        with self.cloud_condition:
+            self.latest_cloud_pose=self.latest_cloud_target_id=None
+            self.locked_cloud_pose=self.locked_cloud_target_id=None
+            self._stable_cloud_pose=None;self._stable_cloud_count=0
+            self.cloud_error='等待随机摆放后的新点云'
+            self.cloud_condition.notify_all()
+        self.publish(f'右侧零件已随机移动到 x={x:.3f} m, y={y:.3f} m')
+
     def require_cloud_pose(self):
         with self.cloud_lock:
             if self.locked_cloud_pose is None:
@@ -377,7 +415,7 @@ class DemoApp(Node):
             return self.locked_cloud_pose.copy()
 
     def wait_for_perception(self):
-        self.publish('等待右腕 D405 点云稳定识别右盒圆柱')
+        self.publish('等待右腕 D405 点云稳定识别右侧独立圆柱')
         with self.cloud_condition:
             self.latest_cloud_pose=None;self.latest_cloud_target_id=None
             self._stable_cloud_pose=None;self._stable_cloud_count=0
@@ -394,7 +432,7 @@ class DemoApp(Node):
                     return self.locked_cloud_pose.copy(),self.locked_cloud_target_id
                 remaining=min(.1,deadline-time.monotonic())
                 self.cloud_condition.wait(max(0,remaining))
-        raise RuntimeError('相机点云未稳定识别到右盒圆柱：'+self.cloud_error)
+        raise RuntimeError('相机点云未稳定识别到右侧独立圆柱：'+self.cloud_error)
 
     def publish(self, text):
         self.status_text = text

@@ -33,7 +33,7 @@ def estimate_upright_cylinder(points, cfg):
         _, indices=np.unique(np.floor((p-roi_min)/voxel).astype(np.int32),axis=0,return_index=True)
         p=p[np.sort(indices)]
     if len(p) < int(cfg.get('min_points', 20)):
-        raise ValueError('右盒点云中圆柱点数不足；检查相机视野、深度距离和 ROI')
+        raise ValueError('右侧 ROI 中圆柱点数不足；检查相机视野、深度距离和 ROI')
     tree = cKDTree(p)
     visited = np.zeros(len(p), dtype=bool)
     candidates = []

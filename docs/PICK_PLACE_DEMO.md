@@ -92,7 +92,7 @@ ros2 launch fr3_dual_arm_grasp grasp.launch.py enable_execution:=false
 
 1. `ready`：双臂空手就绪，双夹爪张开；也用于流程结束后的回位。
 2. `left_place`：左手放置位姿。程序自动生成放置上方点、下降和放置后的抬升路径。
-右腕 D405 在右盒 ROI 中连续识别稳定竖直圆柱，按配置尺寸估计圆柱中心；程序据此生成竖直抓取 TCP 和上方接近位姿。点云、TF、圆柱尺寸或 ROI 任一项无效时流程停止，不从示教点推测抓取位置。
+右腕 D405 在右侧 ROI 中连续识别单个稳定竖直圆柱，按配置尺寸估计圆柱中心；程序据此生成竖直抓取 TCP 和上方接近位姿。点云、TF、圆柱尺寸或 ROI 任一项无效时流程停止，不从示教点推测抓取位置。
 
 展示点由头部相机光轴中心和 30 cm 距离自动生成；交接预备间距由 `handover_separation_m` 给出，左手接取时再从预备位伸进到 `handover_grip_separation_m`（默认 10 mm，沿交接轴偏向左手一侧，让两副手指交错夹住零件而不相撞），并根据右手实时 TCP 动态对齐。旧文件中的 `right_grasp`、`right_display`、`handover_ready`、`left_receive` 会被保留读取但不再要求重新采集。
 
@@ -126,7 +126,7 @@ ros2 launch fr3_dual_arm_grasp grasp.launch.py enable_execution:=false
 nano src/fr3_dual_arm_grasp/config/demo.yaml
 ```
 
-当前 demo 的零件是竖直圆柱，高 35 mm、直径 16 mm。Gazebo 桌面上有左右两个 3×4 分格碰撞盒；右盒每格放一件圆柱，左盒为空。所有盒壁、隔板和圆柱都同步加入 MoveIt 碰撞场景。桌面右侧分格盒每格放一件，左侧分格盒为空。所有隔板和圆柱都在 Gazebo 与 MoveIt 场景中有碰撞几何：
+当前 demo 的零件是竖直圆柱，高 35 mm、直径 16 mm。Gazebo 桌面右侧只有一个独立直立圆柱，左侧保留空的 3×4 放置盒。UI 的“随机摆放右侧零件”按钮会在初始中心半径 10 cm 的圆盘内移动圆柱，并同步更新 Gazebo 与 MoveIt 碰撞场景。原右侧 3×4 盒及 12 个圆柱保存在 `scene.grid_bins.backup.yaml`：
 
 ```yaml
 workpiece:
@@ -184,15 +184,15 @@ workpiece:
 | 1 | `move both ready` | 左右臂同时回到 `ready`。关节模式使用保存的双臂关节角；TCP 模式把两个 TCP 作为 `both_arms` 目标。OMPL 检查双臂互撞、桌面和支撑碰撞。 |
 | 2 | `grip right ready` | 右夹爪张开至就绪点保存的开度。 |
 | 3 | `grip left ready` | 左夹爪张开到 `ready` 保存的开度，避免交接前处于未知状态。 |
-| 4 | `perceive right` | 等待右腕相机连续识别右盒内圆柱，创建对应碰撞目标并由相机位姿生成抓取目标。 |
+| 4 | `perceive right` | 等待右腕相机连续识别右侧独立圆柱，创建对应碰撞目标并由相机位姿生成抓取目标。 |
 | 5 | `orient right right_orient` | 右臂在接近点用关节空间把夹爪姿态调整为竖直向下，为直线下降做准备。 |
 | 6 | `approach right right_grasp` | 右手沿 TCP 直线 MoveL 竖直下降到桌面上方 15 mm 的抓取点（姿态已竖直，纯平移路径可靠完成）。 |
 | 7 | `grasp right right_grasp` | 右夹爪闭合至两爪间只剩 15 mm（`grasp_gap_m`），读取主指反馈换算总开度；连续 5 次变化不超过 0.5 mm 且落在配置范围才认为成功。 |
-| 8 | `attach right` | 将感知选中的圆柱从分格盒碰撞场景转换为附着于右手的碰撞体，并保存 TCP 到零件的相对变换。 |
+| 8 | `attach right` | 将感知选中的圆柱从世界碰撞场景转换为附着于右手的碰撞体，并保存 TCP 到零件的相对变换。 |
 | 9 | `lift right right_lift` | 右手从点云抓取位姿沿世界 +Z 抬升。 |
 | 10 | `scan right right_display` | 右手先到光轴前方 0.30 m 的展示位，再让关节 6 转 -180°，绕 X 轴 ±30°，最后把零件 +Z 轴直接正对相机展示底部。 |
 | 11 | `move both handover_ready` | 右手先到交接预备位、再左手依次到达（不一起动）；右手停在 -Y 侧、左手停在 +Y 侧，两夹爪 Z 轴共线沿 world Y 对指，且绕 Z 轴相差 90°，两臂不交叉、手指不相撞。 |
-| 12 | `touch left` | 左右手交接时临时允许对应手指与已附着圆柱接触；分格盒、隔板和其余圆柱仍参与碰撞检查。 |
+| 12 | `touch left` | 左右手交接时临时允许对应手指与已附着圆柱接触；桌面和左侧放置盒仍参与碰撞检查。 |
 | 13 | `receive left left_receive` | 左手从预备位伸进到 `handover_grip_separation_m`（默认 10 mm，偏向左手一侧），并读取右手实时 TCP 自动修正中心线。修正目标通过左臂 IK、OMPL 和碰撞检测后执行，右臂保持不动。 |
 | 14 | `grasp left left_receive` | 到位后复核中心线横向误差 ≤10 mm、角度误差 ≤5°；通过后左夹爪闭合至 15 mm 并按实际开度自动确认，避免与右手夹爪相撞。失败时右手继续夹持。 |
 | 15 | `transfer left` | 只有左夹爪确认成功后，软件持有者才从右手切换为左手。 |
@@ -224,7 +224,7 @@ workpiece:
 - `config/scene.yaml`：默认启用头部相机和左右腕部 RealSense D405。
 - `config/scene.full_cameras.yaml`：头部、胸/腰部 `waist_camera` 和双腕 D405 完整配置。
 - 恢复时传 `scene:=.../scene.full_cameras.yaml`。相机碰撞体随配置恢复，不改双臂、夹爪或支架。RViz 保留头部图像/点云显示；实机可传 `wrist_cameras:=true left_serial:=... right_serial:=...` 启动双腕相机；默认不启动 USB 驱动。参见 [D405 接口](D405_CAMERAS.md)。
-- 相机订阅 `/right_d405/points`。点云经 TF 变换到 `world`，按右盒 ROI、圆柱高度/半径聚类，并需连续稳定帧后才锁定目标；ROI、安装 TF 或尺寸不匹配时流程停止。
+- 相机订阅 `/right_d405/points`。点云经 TF 变换到 `world`，按右侧 ROI、圆柱高度/半径聚类，并需连续稳定帧后才锁定目标；ROI、安装 TF 或尺寸不匹配时流程停止。
 - 点云回调只替换一帧待处理数据，转换、TF 和聚类在独立工作线程完成；旧帧不会积压，也不会阻塞 `/joint_states` 与运动安全检查。
 - 识别结果只更新候选并在完整流程的 `perceive right` 步骤锁定，不会由相机回调直接触发运动；后续接近、抓取和抬升目标由该次锁定结果生成。
 - `perception.py` 已接入完整流程；点云、TF、ROI 或尺寸校验失败时流程保持停止，不回退到猜测位姿。

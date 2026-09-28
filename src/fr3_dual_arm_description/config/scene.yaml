@@ -70,16 +70,12 @@ table:
   top_z: 0.75
   thickness: 0.04
   leg_width: 0.04
+pickup:
+  entity_name: right_part
+  center_xy: [0.50, -0.48]
+  random_radius_m: 0.10
+  spawn_clearance_m: 0.001
 bins:
-  right:
-    center_xy: [0.50, -0.48]
-    rows: 3
-    cols: 4
-    cell_pitch: 0.045
-    wall_thickness: 0.004
-    floor_thickness: 0.006
-    wall_height: 0.055
-    part_clearance_m: 0.001
   left:
     center_xy: [0.50, 0.48]
     rows: 3
@@ -93,7 +89,7 @@ part:
   radius_m: 0.008
   height_m: 0.035
   mass_kg: 0.025
-  # Choose the right/front edge cell nearest this point for camera-guided grasp.
+  # Initial centre for the standalone camera-guided pickup object.
   preferred_xy: [0.50, -0.48]
 physics:
   step_size: 0.001

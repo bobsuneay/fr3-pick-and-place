@@ -4,6 +4,7 @@ import argparse
 from copy import deepcopy
 import math
 from pathlib import Path
+import random
 import xml.etree.ElementTree as ET
 
 import yaml
@@ -66,13 +67,34 @@ def bin_boxes(scene):
 
 
 def part_poses(scene):
-    cfg=scene.get('bins',{}).get('right',{})
+    pickup=scene.get('pickup',{})
     part=scene.get('part',{})
+    if pickup and part:
+        cx,cy=pickup['center_xy']
+        z=(scene['table']['top_z']+part['height_m']/2+
+           pickup.get('spawn_clearance_m',.001))
+        return [(pickup.get('entity_name','right_part'),[cx,cy,z])]
+    cfg=scene.get('bins',{}).get('right',{})
     if not cfg or not part: return []
     cx,cy=cfg['center_xy']; rows,cols=cfg['rows'],cfg['cols']; pitch=cfg['cell_pitch']
     z=scene['table']['top_z']+cfg['floor_thickness']+part['height_m']/2+cfg.get('part_clearance_m',.001)
     return [(f"right_part_{r:02d}_{c:02d}",[cx+(c-(cols-1)/2)*pitch,cy+(r-(rows-1)/2)*pitch,z])
             for r in range(rows) for c in range(cols)]
+
+
+def random_pickup_xy(scene, rng=None):
+    """Sample uniformly inside the configured pickup disc."""
+    pickup=scene.get('pickup',{})
+    if not pickup:
+        raise ValueError('Scene has no standalone pickup object')
+    center=pickup['center_xy']; radius=float(pickup.get('random_radius_m',.10))
+    if len(center) != 2 or not 0.0 <= radius <= 0.25:
+        raise ValueError('pickup center/radius is invalid')
+    rng = rng or random.SystemRandom()
+    distance=radius*math.sqrt(float(rng.random()))
+    angle=2.0*math.pi*float(rng.random())
+    return [float(center[0])+distance*math.cos(angle),
+            float(center[1])+distance*math.sin(angle)]
 
 def bolt_poses(scene):
     b = scene['bolts']
@@ -232,7 +254,7 @@ def world_xml(scene):
         geometry(visual, 'cylinder', [radius, length])
         appearance(visual, [0.65, 0.69, 0.73, 1])
 
-    if 'bins' in scene:
+    if scene.get('part') and (scene.get('pickup') or scene.get('bins')):
         part=scene['part']; radius=float(part['radius_m']); height=float(part['height_m'])
         part_mass=float(part.get('mass_kg',.025)); inertia_z=.5*part_mass*radius**2
         inertia_xy=part_mass*(3*radius**2+height**2)/12
