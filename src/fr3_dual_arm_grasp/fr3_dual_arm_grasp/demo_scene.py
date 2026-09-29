@@ -159,10 +159,11 @@ class DemoScene:
                 old = AttachedCollisionObject()
                 old.link_name, old.object.id, old.object.operation = self.owner + '_gripper_tcp', self.OBJECT, CollisionObject.REMOVE
                 req.scene.robot_state.attached_collision_objects.append(old)
-            else:
-                old = CollisionObject()
-                old.id, old.operation = self.OBJECT, CollisionObject.REMOVE
-                req.scene.world.collision_objects.append(old)
+            # Do not also send a world REMOVE for the initial attachment.
+            # MoveIt processes attached objects before world collision objects;
+            # adding an AttachedCollisionObject automatically removes the
+            # same id from the world.  A duplicate explicit REMOVE therefore
+            # sees an already-absent object and makes ApplyPlanningScene fail.
             req.scene.robot_state.attached_collision_objects.append(self.attached(side, local, touch))
             self.commit(req)
         self.owner, self.local_pose, self.touch_sides = side, local, touch
