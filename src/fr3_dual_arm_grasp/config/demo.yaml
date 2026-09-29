@@ -56,9 +56,13 @@ show_workpiece_in_rviz: true
 perception:
   cloud_topic: /right_d405/points
   # Standalone part centre moves within 0.10 m of [0.50, -0.48].
-  # Keep an extra 20 mm margin for its radius and simulated depth noise.
-  roi_min: [0.38, -0.60, 0.75]
+  # Start above the 0.750 m tabletop. Including the table joins its dense
+  # point cloud to the cylinder and makes the resulting cluster fail radius
+  # validation.
+  roi_min: [0.38, -0.60, 0.751]
   roi_max: [0.62, -0.36, 0.82]
+  table_z_m: 0.750
+  table_clearance_m: 0.001
   min_points: 20
   cluster_radius_m: 0.010
   preferred_xy: [0.50, -0.48]

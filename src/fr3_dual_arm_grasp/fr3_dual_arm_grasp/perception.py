@@ -21,10 +21,13 @@ class Estimate:
 
 
 def estimate_upright_cylinder(points, cfg):
-    """Find isolated upright cylinder centres in the right-hand bin point cloud."""
+    """Find an isolated upright cylinder while explicitly removing the table."""
     p = np.asarray(points, dtype=float).reshape(-1, 3)
     roi_min, roi_max = np.asarray(cfg['roi_min']), np.asarray(cfg['roi_max'])
     keep = np.all(np.isfinite(p), axis=1) & np.all((p >= roi_min) & (p <= roi_max), axis=1)
+    if 'table_z_m' in cfg:
+        table_cutoff = float(cfg['table_z_m']) + float(cfg.get('table_clearance_m', .001))
+        keep &= p[:, 2] >= table_cutoff
     p = p[keep]
     if len(p):
         # D405 clouds can contain hundreds of thousands of pixels. Voxelize
@@ -37,6 +40,7 @@ def estimate_upright_cylinder(points, cfg):
     tree = cKDTree(p)
     visited = np.zeros(len(p), dtype=bool)
     candidates = []
+    rejected_heights, rejected_radii = [], []
     for seed in range(len(p)):
         if visited[seed]:
             continue
@@ -53,6 +57,7 @@ def estimate_upright_cylinder(points, cfg):
         low, high = np.quantile(cloud[:, 2], [.03, .97])
         height = high-low
         if not .65*cfg['height_m'] <= height <= 1.35*cfg['height_m']:
+            rejected_heights.append(height)
             continue
         xy = cloud[:, :2]
         # Fit a circle to the visible cylinder surface; its median is biased
@@ -64,12 +69,18 @@ def estimate_upright_cylinder(points, cfg):
         radial=np.linalg.norm(xy-center_xy,axis=1)
         radius=float(np.median(radial))
         if not .45*cfg['radius_m'] <= radius <= 1.8*cfg['radius_m']:
+            rejected_radii.append(radius)
             continue
         center = np.r_[center_xy, (low+high)/2]
         pose = np.eye(4); pose[:3, 3] = center
         candidates.append((center, pose, cloud))
     if not candidates:
-        raise ValueError('未在右手盒格内识别到竖直圆柱')
+        details = [f'ROI点={len(p)}']
+        if rejected_heights:
+            details.append('高度=' + ','.join(f'{v*1000:.1f}mm' for v in rejected_heights[:3]))
+        if rejected_radii:
+            details.append('半径=' + ','.join(f'{v*1000:.1f}mm' for v in rejected_radii[:3]))
+        raise ValueError('未识别到右侧独立竖直圆柱（' + '；'.join(details) + '）')
     # Choose an exposed object nearest the configured camera-facing/front edge.
     preferred = np.asarray(cfg['preferred_xy'], dtype=float)
     selected = min(candidates, key=lambda c: np.linalg.norm(c[0][:2]-preferred))

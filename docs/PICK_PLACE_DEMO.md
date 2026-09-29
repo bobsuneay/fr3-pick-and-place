@@ -224,7 +224,7 @@ workpiece:
 - `config/scene.yaml`：默认启用头部相机和左右腕部 RealSense D405。
 - `config/scene.full_cameras.yaml`：头部、胸/腰部 `waist_camera` 和双腕 D405 完整配置。
 - 恢复时传 `scene:=.../scene.full_cameras.yaml`。相机碰撞体随配置恢复，不改双臂、夹爪或支架。RViz 保留头部图像/点云显示；实机可传 `wrist_cameras:=true left_serial:=... right_serial:=...` 启动双腕相机；默认不启动 USB 驱动。参见 [D405 接口](D405_CAMERAS.md)。
-- 相机订阅 `/right_d405/points`。点云经 TF 变换到 `world`，按右侧 ROI、圆柱高度/半径聚类，并需连续稳定帧后才锁定目标；ROI、安装 TF 或尺寸不匹配时流程停止。
+- 相机订阅 `/right_d405/points`。点云经 TF 变换到 `world`，先按 `table_z_m + table_clearance_m` 去除桌面，再按右侧 ROI、圆柱高度/半径聚类，并需连续稳定帧后才锁定目标；ROI、安装 TF 或尺寸不匹配时流程停止。默认桌面为 0.750 m，ROI 从 0.751 m 开始，禁止把桌面平面并入圆柱点簇。
 - 点云回调只替换一帧待处理数据，转换、TF 和聚类在独立工作线程完成；旧帧不会积压，也不会阻塞 `/joint_states` 与运动安全检查。
 - 识别结果只更新候选并在完整流程的 `perceive right` 步骤锁定，不会由相机回调直接触发运动；后续接近、抓取和抬升目标由该次锁定结果生成。
 - `perception.py` 已接入完整流程；点云、TF、ROI 或尺寸校验失败时流程保持停止，不回退到猜测位姿。
