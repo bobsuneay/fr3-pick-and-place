@@ -138,7 +138,7 @@ class TeachBook:
             raise ValueError('Teach missing points: ' + ', '.join(sorted(missing)))
         for point in self.points.values():
             self.validate_point(point)
-        # Grasp, display and handover points are generated from these three
+        # Grasp, display and handover points are generated from these two
         # measured points at runtime; they are intentionally not required here.
 
     def save(self, path):

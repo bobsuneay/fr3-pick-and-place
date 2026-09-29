@@ -11,7 +11,7 @@ def test_panel_builds_and_formats_measured_feedback(monkeypatch):
     tk = pytest.importorskip('tkinter')
     pytest.importorskip('scipy')
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src/fr3_dual_arm_grasp'))
-    from fr3_dual_arm_grasp.teach_model import Feedback, TeachBook, MEASURED, captured_point
+    from fr3_dual_arm_grasp.teach_model import Feedback, TeachBook, MEASURED, SLOTS, captured_point
     fake_ros, fake_app = ModuleType('rclpy'), ModuleType('fr3_dual_arm_grasp.app')
     fake_app.DemoApp = object
     monkeypatch.setitem(sys.modules, 'rclpy', fake_ros)
@@ -44,7 +44,7 @@ def test_panel_builds_and_formats_measured_feedback(monkeypatch):
         assert '20.00 mm' in panel.feedback.get()
         assert 'RPY' in panel.details.get()
         assert panel.tcp[0].get() == '500.000'
-        assert len(panel.tree.get_children()) == 3
+        assert len(panel.tree.get_children()) == len(SLOTS)
         panel.toggle_keypoint_mode()
         assert app.keypoint_motion_mode == 'tcp'
         assert 'TCP' in panel.keypoint_mode_label.get()

@@ -28,8 +28,8 @@ def book():
     result = TeachBook('model-test', 0.1)
     for name in SLOTS:
         result.record(name, point())
-    result.points['right_pregrasp']['right']['gap_m'] = 0.1
     result.points['ready']['left']['gap_m'] = 0.1
+    result.points['ready']['right']['gap_m'] = 0.1
     return result
 
 
@@ -124,7 +124,8 @@ class FakeApp:
         self.fail_at = fail_at
         self.grasp_gap = 0.015
         self.motion = SimpleNamespace(guard=self.guard, gripper=self.grip)
-        self.scene = SimpleNamespace(owner=None, place_initial=lambda p: self.event('initial'),
+        self.scene = SimpleNamespace(owner=None, initialize=lambda: None,
+                                     place_initial=lambda p, target_id=None: self.event('initial'),
                                      attach=self.attach, detach=self.detach,
                                      set_touch=lambda sides: self.event('touch', *sides),
                                      allow=lambda sides, table=False: self.event('allow', str(table)))
@@ -161,8 +162,11 @@ class FakeApp:
     def initialize_scene(self):
         pass
 
-    def grasp_target(self):
-        return self.book.points['right_pregrasp']['right']['tcp']
+    def wait_for_perception(self):
+        return self.book.points['ready']['right']['tcp'], 'right_part'
+
+    def cloud_grasp_tcp(self, pose):
+        return pose
 
     def scan_display(self, side):
         self.event('scan', side)
@@ -252,5 +256,6 @@ def test_old_points_load_without_requiring_obsolete_views(tmp_path):
     target = TeachBook('model-test', 0.1)
     target.load(path)
     target.validate_complete()
-    assert len(target.points) == 3
+    assert len(target.points) == len(SLOTS)
+    assert 'right_view_1' not in target.points
     assert 'right_view_1' in json.loads(path.read_text())['points']
