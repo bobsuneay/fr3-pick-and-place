@@ -186,6 +186,7 @@ class DemoScene:
             req.scene.world.collision_objects = [box_object(self.OBJECT, self.dimensions, world, shape=self.shape)]
             self.commit(req)
         self.owner, self.local_pose, self.world_pose = None, None, world
+        self.target_id = None
 
     def clear_after_manual_recovery(self):
         # Called only by the dedicated operator recovery command after physical
@@ -206,4 +207,4 @@ class DemoScene:
             req.scene.world.collision_objects.append(target)
         self.commit(req)
         self.allow([])
-        self.owner = self.local_pose = self.world_pose = None
+        self.owner = self.local_pose = self.world_pose = self.target_id = None

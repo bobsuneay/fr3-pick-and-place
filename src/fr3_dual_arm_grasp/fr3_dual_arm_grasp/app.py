@@ -61,6 +61,7 @@ class DemoApp(Node):
         self.mode = param('mode')
         self.set_entity = (self.create_client(SetEntityState, '/gazebo/set_entity_state')
                            if self.mode == 'gazebo' else None)
+        self.gazebo_follow_future = None
         self.robot_ips = {}
         if self.mode == 'real':
             from fr3_dual_arm_description.model import validate_hardware
@@ -206,6 +207,12 @@ class DemoApp(Node):
         self._stable_cloud_count = 0
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
+        if self.mode == 'gazebo':
+            # MoveIt attachment changes collision planning only. Gazebo's
+            # dynamic entity otherwise remains free and falls as soon as the
+            # gripper lifts, so keep the sensed entity on its owning TCP while
+            # the simulated workflow reports ownership.
+            self.create_timer(1.0 / 30.0, self._follow_gazebo_workpiece)
         self.perception = config.get('perception', {})
         # PointCloud2 conversion, TF and clustering are intentionally kept off
         # the ROS executor thread.  The callback below only replaces one pending
@@ -228,6 +235,45 @@ class DemoApp(Node):
 
     def on_joints(self, msg):
         self.feedback.update(msg.name, msg.position)
+
+    def _follow_gazebo_workpiece(self):
+        """Kinematically carry the Gazebo entity currently owned by a gripper."""
+        if self.set_entity is None:
+            return
+        pending = self.gazebo_follow_future
+        if pending is not None:
+            if not pending.done():
+                return
+            self.gazebo_follow_future = None
+            try:
+                response = pending.result()
+                if response is None or not response.success:
+                    self.get_logger().warning('Gazebo 零件跟随更新失败')
+            except Exception as exc:
+                self.get_logger().warning('Gazebo 零件跟随服务异常：%s', exc)
+        owner = self.scene.owner
+        target_id = self.scene.target_id
+        local_pose = self.scene.local_pose
+        if not owner or not target_id or local_pose is None:
+            return
+        try:
+            transform = self.tf_buffer.lookup_transform(
+                'world', owner + '_gripper_tcp', Time())
+        except Exception:
+            return
+        t = transform.transform.translation
+        q = transform.transform.rotation
+        world_tcp = np.eye(4)
+        world_tcp[:3, :3] = Rotation.from_quat([q.x, q.y, q.z, q.w]).as_matrix()
+        world_tcp[:3, 3] = [t.x, t.y, t.z]
+        pose = vector(world_tcp @ matrix(local_pose))
+        request = SetEntityState.Request()
+        request.state.name = target_id
+        request.state.reference_frame = 'world'
+        request.state.pose.position.x, request.state.pose.position.y, request.state.pose.position.z = pose[:3]
+        (request.state.pose.orientation.x, request.state.pose.orientation.y,
+         request.state.pose.orientation.z, request.state.pose.orientation.w) = pose[3:]
+        self.gazebo_follow_future = self.set_entity.call_async(request)
 
     def _refresh_kinematics_seed(self):
         """Seed the numeric IK with the taught, guaranteed-reachable ready pose."""
