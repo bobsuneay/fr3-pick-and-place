@@ -17,7 +17,11 @@
 namespace fr3_dual_arm_grasp_sim {
 class AssistedGrasp : public gazebo::WorldPlugin {
   using SetBool = std_srvs::srv::SetBool;
-  struct Pending { std::string side, message; bool close=false, done=false, success=false, expired=false; };
+  struct Pending {
+    std::string side, message;
+    double deadline=0.0;
+    bool close=false, done=false, success=false, expired=false;
+  };
   gazebo::physics::WorldPtr world_;
   gazebo_ros::Node::SharedPtr node_;
   gazebo::event::ConnectionPtr update_, contact_update_;
@@ -37,7 +41,8 @@ class AssistedGrasp : public gazebo::WorldPlugin {
           const SetBool::Request::SharedPtr req, SetBool::Response::SharedPtr res){
         std::unique_lock<std::mutex> lock(mutex_);
         if(pending_){res->message="Another operation is pending";return;}
-        auto p=std::make_shared<Pending>();p->side=side;p->close=req->data;pending_=p;
+        auto p=std::make_shared<Pending>();p->side=side;p->close=req->data;
+        p->deadline=world_->SimTime().Double()+2.0;pending_=p;
         if(!cv_.wait_for(lock,std::chrono::seconds(2),[&p]{return p->done;})){
           p->expired=true;pending_.reset();res->message="Simulation did not advance; request expired";return;}
         res->success=p->success;res->message=p->message;
@@ -80,8 +85,17 @@ class AssistedGrasp : public gazebo::WorldPlugin {
       auto robot=world_->ModelByName(robot_),object=world_->ModelByName(object_);if(!robot||!object)throw std::runtime_error("Robot/workpiece model missing");
       auto palm=robot->GetLink(p->side+"_gripper_palm"),body=object->GetLink("body");if(!palm||!body)throw std::runtime_error("Required physical link missing");
       if(p->close){size_t i=p->side=="left"?0:1;double now=world_->SimTime().Double();
-        if(!contacts_[i].ready(now))throw std::runtime_error("Require >=100 ms sustained contact on BOTH fingers");
-        if(!FingerFeedbackReady(p->side,robot))throw std::runtime_error("Invalid or unsynchronized physical finger feedback");
+        // Contact samples arrive at WorldUpdateEnd, while this callback runs
+        // at WorldUpdateBegin.  Keep the request pending until the bilateral
+        // evidence is stable instead of failing on the first transient frame.
+        if(!contacts_[i].ready(now)){
+          if(now < p->deadline)return;
+          throw std::runtime_error("Require >=100 ms sustained contact on BOTH fingers");
+        }
+        if(!FingerFeedbackReady(p->side,robot)){
+          if(now < p->deadline)return;
+          throw std::runtime_error("Invalid or unsynchronized physical finger feedback");
+        }
         if(owner_!=p->side){auto next=world_->Physics()->CreateJoint("fixed",robot);if(!next)throw std::runtime_error("Cannot create assisted grasp joint");
           next->SetName("fr3_assisted_grasp_"+p->side);next->Attach(palm,body);next->Load(palm,body,ignition::math::Pose3d::Zero);next->SetModel(object);next->Init();
           if(grasp_){grasp_->Detach();grasp_->Fini();}grasp_=next;owner_=p->side;}

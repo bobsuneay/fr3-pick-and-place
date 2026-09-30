@@ -20,6 +20,8 @@ class AssistedGraspPluginTests(unittest.TestCase):
     def test_plugin_requires_bilateral_contact_and_creates_fixed_joint(self):
         source = (ROOT / 'src/fr3_dual_arm_grasp_sim/src/assisted_grasp.cpp').read_text(encoding='utf-8')
         self.assertIn('contacts_[i].ready(now)', source)
+        self.assertIn('if(now < p->deadline)return;', source)
+        self.assertIn('p->deadline=world_->SimTime().Double()+2.0', source)
         self.assertIn('CreateJoint("fixed",robot)', source)
         self.assertIn('next->Attach(palm,body)', source)
         self.assertIn('grasp_->Detach()', source)
