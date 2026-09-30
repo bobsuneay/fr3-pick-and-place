@@ -39,13 +39,14 @@ class AssistedGrasp : public gazebo::WorldPlugin {
       const std::string side=i==0?"left":"right";
       services_[i]=node_->create_service<SetBool>(side+"_grasp",[this,side](
           const SetBool::Request::SharedPtr req, SetBool::Response::SharedPtr res){
-        std::unique_lock<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> lock(mutex_);
         if(pending_){res->message="Another operation is pending";return;}
         auto p=std::make_shared<Pending>();p->side=side;p->close=req->data;
         p->deadline=world_->SimTime().Double()+2.0;pending_=p;
-        if(!cv_.wait_for(lock,std::chrono::seconds(2),[&p]{return p->done;})){
-          p->expired=true;pending_.reset();res->message="Simulation did not advance; request expired";return;}
-        res->success=p->success;res->message=p->message;
+        // Never wait here: this callback may run on the same ROS/Gazebo
+        // thread that must advance the world and produce contact samples.
+        // Update() completes the request asynchronously.
+        res->success=true;res->message="accepted; waiting for Gazebo contact evidence";
       });
     }
     status_=node_->create_service<std_srvs::srv::Trigger>("owner",[this](

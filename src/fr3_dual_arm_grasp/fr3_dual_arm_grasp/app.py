@@ -249,6 +249,16 @@ class DemoApp(Node):
             raise RuntimeError('Gazebo 抓取所有权服务不可用')
         return response.message
 
+    def _wait_sim_owner(self, expected, timeout=2.5):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            owner = self._sim_grasp_owner()
+            if owner == expected:
+                return
+            if self.stop_event.wait(0.05):
+                raise RuntimeError('Cancelled while waiting for Gazebo grasp ownership')
+        raise RuntimeError(f'Gazebo 固定关节所有权未切换到 {expected}')
+
     def attach_workpiece(self, side, transfer=False):
         """Acquire Gazebo fixed-joint ownership before updating MoveIt."""
         if self.mode == 'gazebo':
@@ -259,8 +269,7 @@ class DemoApp(Node):
                 self.sim_grasps[side], SetBool.Request(data=True))
             if not response.success:
                 raise RuntimeError('Gazebo 双指接触验证失败：' + response.message)
-            if self._sim_grasp_owner() != side:
-                raise RuntimeError('Gazebo 固定关节所有权未切换到 ' + side)
+            self._wait_sim_owner(side)
         self.scene.attach(side, transfer=transfer)
 
     def test_sim_grasp(self, side):
@@ -299,8 +308,7 @@ class DemoApp(Node):
                     self.sim_grasps[owner], SetBool.Request(data=False))
                 if not response.success:
                     raise RuntimeError('Gazebo 固定关节释放失败：' + response.message)
-                if self._sim_grasp_owner():
-                    raise RuntimeError('Gazebo 零件释放后仍有抓取所有者')
+                self._wait_sim_owner('', timeout=2.5)
         self.scene.detach()
 
     def _refresh_kinematics_seed(self):
