@@ -156,6 +156,15 @@ class FakeApp:
         self.event('detach')
         self.scene.owner = None
 
+    def attach_workpiece(self, side, transfer=False):
+        self.attach(side, transfer)
+
+    def test_sim_grasp(self, side):
+        self.event('test_lift', side)
+
+    def detach_workpiece(self):
+        self.detach()
+
     def move_point(self, key, side, execute, linear=False):
         self.event('move', side, key)
 

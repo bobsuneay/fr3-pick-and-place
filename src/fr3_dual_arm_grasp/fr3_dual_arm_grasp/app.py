@@ -9,7 +9,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 from moveit_msgs.srv import GetPositionFK
 from controller_manager_msgs.srv import SwitchController, ListControllers
-from gazebo_msgs.srv import SetEntityState
+from gazebo_msgs.srv import GetEntityState, SetEntityState
 
 import rclpy
 from rclpy.node import Node
@@ -19,7 +19,7 @@ from sensor_msgs_py import point_cloud2
 from tf2_ros import Buffer, TransformListener
 from rclpy.time import Time
 from std_msgs.msg import String
-from std_srvs.srv import Trigger
+from std_srvs.srv import SetBool, Trigger
 import yaml
 from ament_index_python.packages import get_package_share_directory
 
@@ -61,7 +61,12 @@ class DemoApp(Node):
         self.mode = param('mode')
         self.set_entity = (self.create_client(SetEntityState, '/gazebo/set_entity_state')
                            if self.mode == 'gazebo' else None)
-        self.gazebo_follow_future = None
+        self.get_entity = (self.create_client(GetEntityState, '/gazebo/get_entity_state')
+                           if self.mode == 'gazebo' else None)
+        self.sim_grasps = ({side: self.create_client(SetBool, f'/grasp/sim/{side}_grasp')
+                            for side in SIDES} if self.mode == 'gazebo' else {})
+        self.sim_owner = (self.create_client(Trigger, '/grasp/sim/owner')
+                          if self.mode == 'gazebo' else None)
         self.robot_ips = {}
         if self.mode == 'real':
             from fr3_dual_arm_description.model import validate_hardware
@@ -207,12 +212,6 @@ class DemoApp(Node):
         self._stable_cloud_count = 0
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
-        if self.mode == 'gazebo':
-            # MoveIt attachment changes collision planning only. Gazebo's
-            # dynamic entity otherwise remains free and falls as soon as the
-            # gripper lifts, so keep the sensed entity on its owning TCP while
-            # the simulated workflow reports ownership.
-            self.create_timer(1.0 / 30.0, self._follow_gazebo_workpiece)
         self.perception = config.get('perception', {})
         # PointCloud2 conversion, TF and clustering are intentionally kept off
         # the ROS executor thread.  The callback below only replaces one pending
@@ -236,44 +235,67 @@ class DemoApp(Node):
     def on_joints(self, msg):
         self.feedback.update(msg.name, msg.position)
 
-    def _follow_gazebo_workpiece(self):
-        """Kinematically carry the Gazebo entity currently owned by a gripper."""
-        if self.set_entity is None:
+    def _sim_grasp_owner(self):
+        if self.sim_owner is None:
+            return None
+        response = self.motion.service(self.sim_owner, Trigger.Request())
+        if not response.success:
+            raise RuntimeError('Gazebo 抓取所有权服务不可用')
+        return response.message
+
+    def attach_workpiece(self, side, transfer=False):
+        """Acquire Gazebo fixed-joint ownership before updating MoveIt."""
+        if self.mode == 'gazebo':
+            # The plugin requires 100 ms of continuous bilateral contact.
+            if self.stop_event.wait(.15):
+                raise RuntimeError('Cancelled before Gazebo grasp validation')
+            response = self.motion.service(
+                self.sim_grasps[side], SetBool.Request(data=True))
+            if not response.success:
+                raise RuntimeError('Gazebo 双指接触验证失败：' + response.message)
+            if self._sim_grasp_owner() != side:
+                raise RuntimeError('Gazebo 固定关节所有权未切换到 ' + side)
+        self.scene.attach(side, transfer=transfer)
+
+    def test_sim_grasp(self, side):
+        """Lift 15 mm and prove the fixed-joint object follows before transport."""
+        if self.mode != 'gazebo':
             return
-        pending = self.gazebo_follow_future
-        if pending is not None:
-            if not pending.done():
-                return
-            self.gazebo_follow_future = None
-            try:
-                response = pending.result()
-                if response is None or not response.success:
-                    self.get_logger().warning('Gazebo 零件跟随更新失败')
-            except Exception as exc:
-                self.get_logger().warning('Gazebo 零件跟随服务异常：%s', exc)
-        owner = self.scene.owner
-        target_id = self.scene.target_id
-        local_pose = self.scene.local_pose
-        if not owner or not target_id or local_pose is None:
-            return
-        try:
-            transform = self.tf_buffer.lookup_transform(
-                'world', owner + '_gripper_tcp', Time())
-        except Exception:
-            return
-        t = transform.transform.translation
-        q = transform.transform.rotation
-        world_tcp = np.eye(4)
-        world_tcp[:3, :3] = Rotation.from_quat([q.x, q.y, q.z, q.w]).as_matrix()
-        world_tcp[:3, 3] = [t.x, t.y, t.z]
-        pose = vector(world_tcp @ matrix(local_pose))
-        request = SetEntityState.Request()
-        request.state.name = target_id
-        request.state.reference_frame = 'world'
-        request.state.pose.position.x, request.state.pose.position.y, request.state.pose.position.z = pose[:3]
-        (request.state.pose.orientation.x, request.state.pose.orientation.y,
-         request.state.pose.orientation.z, request.state.pose.orientation.w) = pose[3:]
-        self.gazebo_follow_future = self.set_entity.call_async(request)
+        lift = float(self.perception.get('grasp_test_lift_m', .015))
+        tolerance = float(self.perception.get('grasp_follow_tolerance_m', .006))
+        tcp = self.motion.tcp_poses()[side]
+        target = list(tcp); target[2] += lift
+        self.motion.pose(side, target, True, linear=True)
+        if self._sim_grasp_owner() != side:
+            raise RuntimeError('15 mm 试抬期间 Gazebo 抓取所有权丢失')
+        request = GetEntityState.Request()
+        request.name = self.scene.target_id
+        request.reference_frame = 'world'
+        state = self.motion.service(self.get_entity, request)
+        if not state.success:
+            raise RuntimeError('无法读取 Gazebo 零件状态：' + state.status_message)
+        actual = np.array([state.state.pose.position.x, state.state.pose.position.y,
+                           state.state.pose.position.z])
+        tcp_now = matrix(self.motion.tcp_poses()[side])
+        expected = (tcp_now @ matrix(self.scene.local_pose))[:3, 3]
+        error = float(np.linalg.norm(actual - expected))
+        if error > tolerance:
+            raise RuntimeError(
+                f'Gazebo 试抬跟随误差 {error*1000:.1f} mm，超过 {tolerance*1000:.1f} mm')
+        self.publish(f'Gazebo 固定关节试抬通过：跟随误差 {error*1000:.1f} mm')
+
+    def detach_workpiece(self):
+        """Release the Gazebo fixed joint, then restore the MoveIt world body."""
+        if self.mode == 'gazebo':
+            owner = self._sim_grasp_owner()
+            if owner:
+                response = self.motion.service(
+                    self.sim_grasps[owner], SetBool.Request(data=False))
+                if not response.success:
+                    raise RuntimeError('Gazebo 固定关节释放失败：' + response.message)
+                if self._sim_grasp_owner():
+                    raise RuntimeError('Gazebo 零件释放后仍有抓取所有者')
+        self.scene.detach()
 
     def _refresh_kinematics_seed(self):
         """Seed the numeric IK with the taught, guaranteed-reachable ready pose."""
@@ -427,7 +449,7 @@ class DemoApp(Node):
     def randomize_workpiece(self):
         if self.mode != 'gazebo' or self.set_entity is None:
             raise RuntimeError('随机摆放仅用于 Gazebo 仿真')
-        if self.scene.owner or self.recovery_required:
+        if self.scene.owner or self.recovery_required or self._sim_grasp_owner():
             raise RuntimeError('流程或恢复状态未清除，不能移动零件')
         poses=part_poses(self.scene.scene)
         if len(poses) != 1:
@@ -535,6 +557,10 @@ class DemoApp(Node):
     def initialize_scene(self):
         if self.teaching.state != 'motion':
             raise RuntimeError('请先恢复运动控制；当前模式：' + self.teaching.state)
+        if self.mode == 'gazebo':
+            owner = self._sim_grasp_owner()
+            if owner and owner != self.scene.owner:
+                raise RuntimeError('Gazebo 固定关节存在未同步所有权，请先执行人工恢复')
         if not self.scene.ready:
             self.scene.initialize()
 
@@ -945,6 +971,13 @@ class DemoApp(Node):
         run_workflow(self)
 
     def recover(self):
+        if self.mode == 'gazebo':
+            owner = self._sim_grasp_owner()
+            if owner:
+                response = self.motion.service(
+                    self.sim_grasps[owner], SetBool.Request(data=False))
+                if not response.success:
+                    raise RuntimeError('Gazebo 恢复时固定关节释放失败：' + response.message)
         self.scene.clear_after_manual_recovery()
         self.recovery_required = False
 

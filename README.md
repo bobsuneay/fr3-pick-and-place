@@ -2,6 +2,8 @@
 
 基于 `fr3-standard3ok` 的 MoveIt 2 实机工程，复现 `fr3-sim5` 的点云抓取、展示、交接流程，并增加最终放置。抓取目标由右腕 D405 实时识别，展示和交接仍沿用原流程。
 
+Gazebo 抓取使用独立的 `fr3_dual_arm_grasp_sim` 辅助插件：双指持续接触确认后创建固定关节，并通过 15 mm 试抬验证后才继续搬运；实机模式不加载该插件。
+
 **完整安装、示教与实机操作：[PICK_PLACE_DEMO.md](docs/PICK_PLACE_DEMO.md)**
 
 - 原生中文界面：双臂关节角、TCP、夹爪开度；仅采集 `ready`、`left_place` 两个点；抓取位姿由右腕点云相机识别。

@@ -170,6 +170,14 @@ def world_xml(scene):
                            filename='libgazebo_ros_state.so')
     element(element(state_plugin, 'ros'), 'namespace', '/gazebo')
     element(state_plugin, 'update_rate', 30.0)
+    pickup = scene.get('pickup')
+    if pickup:
+        grasp = element(world, 'plugin', name='fr3_assisted_grasp',
+                        filename='libfr3_dual_arm_assisted_grasp.so')
+        ros = element(grasp, 'ros')
+        element(ros, 'namespace', '/grasp/sim')
+        element(grasp, 'robot_model', 'fr3_dual_arm')
+        element(grasp, 'object_model', pickup.get('entity_name', 'right_part'))
 
     physics = element(world, 'physics', name='fr3_physics', type='ode')
     element(physics, 'max_step_size', scene['physics']['step_size'])

@@ -29,7 +29,7 @@ Gazebo 深度通常为 `32FC1`（米），RealSense 为 `16UC1`（毫米）；�
 ```bash
 cd /home/suneasy/fr3-pick-and-place
 source /opt/ros/humble/setup.bash
-colcon build --symlink-install --packages-select fr3_dual_arm_description fr3_dual_arm_bringup fr3_dual_arm_calibration fr3_dual_arm_grasp
+colcon build --symlink-install --packages-select fr3_dual_arm_description fr3_dual_arm_grasp_sim fr3_dual_arm_gazebo fr3_dual_arm_bringup fr3_dual_arm_calibration fr3_dual_arm_grasp
 source install/setup.bash
 ros2 launch fr3_dual_arm_bringup pick_place.launch.py mode:=gazebo
 ```

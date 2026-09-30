@@ -27,6 +27,7 @@
   <exec_depend>shape_msgs</exec_depend>
   <exec_depend>fr3_dual_arm_description</exec_depend>
   <exec_depend>fr3_dual_arm_moveit_config</exec_depend>
+  <exec_depend>fr3_dual_arm_grasp_sim</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
 
   <export>

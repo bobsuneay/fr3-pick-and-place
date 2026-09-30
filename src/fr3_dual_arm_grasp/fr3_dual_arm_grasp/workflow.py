@@ -64,10 +64,12 @@ def _run_step(app, kind, side, key):
         app.motion.gripper(side, app.grasp_gap, execute=True)
         app.verify_grasp(side)
     elif kind in ('attach', 'transfer'):
-        app.scene.attach(side, transfer=(kind == 'transfer'))
+        app.attach_workpiece(side, transfer=(kind == 'transfer'))
+    elif kind == 'test_lift':
+        app.test_sim_grasp(side)
     elif kind == 'touch':
         app.scene.set_touch(['left', 'right'])
     elif kind == 'touch_only':
         app.scene.set_touch([side])
     elif kind == 'detach':
-        app.scene.detach()
+        app.detach_workpiece()

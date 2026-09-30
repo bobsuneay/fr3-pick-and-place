@@ -69,6 +69,9 @@ perception:
   stable_frames: 3
   max_age_seconds: 0.6
   approach_clearance_m: 0.070
+  # Gazebo only: prove the fixed-joint grasp with a short lift before transport.
+  grasp_test_lift_m: 0.015
+  grasp_follow_tolerance_m: 0.006
 
 
 # Donor withdraws along negative TCP Z; MoveIt rejects blocked paths.
