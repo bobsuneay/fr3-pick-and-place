@@ -44,10 +44,12 @@ class DemoScene:
     OBJECT = 'fr3_demo_workpiece'
 
     def __init__(self, node, motion, scene, dimensions, tcp_offset,
-                 show_environment=True, show_workpiece=False, shape='box'):
+                 show_environment=True, show_parts=True, show_workpiece=False,
+                 shape='box'):
         self.motion, self.scene = motion, scene
         self.dimensions, self.offset = dimensions, tcp_offset
         self.show_environment = bool(show_environment)
+        self.show_parts = bool(show_parts)
         self.shape = shape
         self.show_workpiece = bool(show_workpiece)
         self.owner, self.local_pose, self.world_pose = None, None, None
@@ -78,11 +80,15 @@ class DemoScene:
         update = self.diff()
         for name, size, xyz in table_boxes(self.scene):
             update.scene.world.collision_objects.append(box_object(name, size, list(xyz) + [0, 0, 0, 1]))
-        part=self.scene.get('part', {})
-        for name,xyz in part_poses(self.scene):
-            update.scene.world.collision_objects.append(box_object(
-                name,[part['height_m'],2*part['radius_m'],2*part['radius_m']],
-                list(xyz)+[0,0,0,1],shape='cylinder'))
+        # In real mode ``show_environment`` is kept true so the table is
+        # available for collision checking, but no simulated parts/bins are
+        # inserted into RViz. Gazebo still publishes the complete scene.
+        if self.show_parts:
+            part = self.scene.get('part', {})
+            for name, xyz in part_poses(self.scene):
+                update.scene.world.collision_objects.append(box_object(
+                    name, [part['height_m'], 2*part['radius_m'], 2*part['radius_m']],
+                    list(xyz) + [0, 0, 0, 1], shape='cylinder'))
         self.commit(update)
         self.ready = True
 
@@ -132,7 +138,7 @@ class DemoScene:
 
     def move_static_part(self, target_id, xyz):
         """Move the unattached source object in the MoveIt world."""
-        if not self.show_environment:
+        if not self.show_parts:
             return
         if self.owner or self.target_id:
             raise RuntimeError('Cannot randomize a workpiece owned by an active workflow')

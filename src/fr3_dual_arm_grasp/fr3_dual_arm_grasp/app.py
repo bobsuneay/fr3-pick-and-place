@@ -134,7 +134,10 @@ class DemoApp(Node):
             raise ValueError('Gazebo scene part and demo workpiece dimensions must match')
         self.scene = DemoScene(
             self, self.motion, scene, dimensions, offset,
-            show_environment=self.mode != 'real',
+            # The physical table remains a useful collision model in real
+            # mode; only simulated parts and bins are disabled there.
+            show_environment=True,
+            show_parts=self.mode != 'real',
             show_workpiece=(self.mode != 'real' and
                             config.get('show_workpiece_in_rviz', False)),
             shape=shape)
