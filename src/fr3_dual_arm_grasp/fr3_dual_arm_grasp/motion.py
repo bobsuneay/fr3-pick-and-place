@@ -225,7 +225,7 @@ class DualArmMoveIt:
                     raise
                 self.node.get_logger().warning(
                     'Joint feedback differs from target, but TCP reached; '
-                    'continuing: %s', joint_error)
+                    f'continuing: {joint_error}')
         return result
 
     @staticmethod
@@ -430,5 +430,5 @@ class DualArmMoveIt:
                     raise
                 self.node.get_logger().warning(
                     'Cartesian TCP reached despite joint feedback mismatch; '
-                    'continuing: %s', joint_error)
+                    f'continuing: {joint_error}')
         return trajectory
