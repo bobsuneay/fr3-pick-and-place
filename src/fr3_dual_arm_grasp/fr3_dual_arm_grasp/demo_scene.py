@@ -44,9 +44,10 @@ class DemoScene:
     OBJECT = 'fr3_demo_workpiece'
 
     def __init__(self, node, motion, scene, dimensions, tcp_offset,
-                 show_workpiece=False, shape='box'):
+                 show_environment=True, show_workpiece=False, shape='box'):
         self.motion, self.scene = motion, scene
         self.dimensions, self.offset = dimensions, tcp_offset
+        self.show_environment = bool(show_environment)
         self.shape = shape
         self.show_workpiece = bool(show_workpiece)
         self.owner, self.local_pose, self.world_pose = None, None, None
@@ -66,6 +67,9 @@ class DemoScene:
             raise RuntimeError('MoveIt rejected planning scene update')
 
     def initialize(self):
+        if not self.show_environment:
+            self.ready = True
+            return
         req = GetPlanningScene.Request()
         req.components.components = PlanningSceneComponents.ROBOT_STATE_ATTACHED_OBJECTS
         existing = self.motion.service(self.get, req).scene.robot_state.attached_collision_objects
@@ -83,6 +87,8 @@ class DemoScene:
         self.ready = True
 
     def allow(self, sides, table=False):
+        if not self.show_workpiece:
+            return
         # Read-modify-write preserves every unrelated collision pair. The only
         # allowances this application owns involve its own workpiece.
         req = GetPlanningScene.Request()
@@ -126,6 +132,8 @@ class DemoScene:
 
     def move_static_part(self, target_id, xyz):
         """Move the unattached source object in the MoveIt world."""
+        if not self.show_environment:
+            return
         if self.owner or self.target_id:
             raise RuntimeError('Cannot randomize a workpiece owned by an active workflow')
         req = self.diff()
@@ -169,8 +177,9 @@ class DemoScene:
         self.owner, self.local_pose, self.touch_sides = side, local, touch
 
     def set_touch(self, sides):
-        self.allow(sides)
-        if self.owner:
+        if self.show_workpiece:
+            self.allow(sides)
+        if self.show_workpiece and self.owner:
             req = self.diff()
             req.scene.robot_state.attached_collision_objects = [self.attached(self.owner, self.local_pose, sides)]
             self.commit(req)
@@ -191,6 +200,11 @@ class DemoScene:
     def clear_after_manual_recovery(self):
         # Called only by the dedicated operator recovery command after physical
         # recovery. It never opens a gripper or moves the robot.
+        if not self.show_workpiece:
+            self.owner = self.local_pose = self.world_pose = None
+            self.target_id = None
+            self.touch_sides = []
+            return
         query = GetPlanningScene.Request()
         query.components.components = PlanningSceneComponents.ROBOT_STATE_ATTACHED_OBJECTS
         bodies = self.motion.service(self.get, query).scene.robot_state.attached_collision_objects

@@ -134,7 +134,10 @@ class DemoApp(Node):
             raise ValueError('Gazebo scene part and demo workpiece dimensions must match')
         self.scene = DemoScene(
             self, self.motion, scene, dimensions, offset,
-            show_workpiece=config.get('show_workpiece_in_rviz', False), shape=shape)
+            show_environment=self.mode != 'real',
+            show_workpiece=(self.mode != 'real' and
+                            config.get('show_workpiece_in_rviz', False)),
+            shape=shape)
         self.dwell = float(config.get('display_dwell_seconds', 2.0))
         if not 0 <= self.dwell <= 60:
             raise ValueError('Display dwell must be 0..60 seconds')

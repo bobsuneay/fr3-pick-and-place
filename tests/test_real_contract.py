@@ -163,5 +163,13 @@ class ContractTests(unittest.TestCase):
                     launch.start({'enable_execution': 'true', 'hardware': str(hardware_file)})
 
 
+    def test_real_mode_hides_virtual_environment_and_workpiece(self):
+        app = (ROOT / 'src/fr3_dual_arm_grasp/fr3_dual_arm_grasp/app.py').read_text(encoding='utf-8')
+        scene = (ROOT / 'src/fr3_dual_arm_grasp/fr3_dual_arm_grasp/demo_scene.py').read_text(encoding='utf-8')
+        self.assertIn("show_environment=self.mode != 'real'", app)
+        self.assertIn("show_workpiece=(self.mode != 'real'", app)
+        self.assertIn('if not self.show_environment:', scene)
+
+
 if __name__ == '__main__':
     unittest.main()
