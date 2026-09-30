@@ -89,7 +89,13 @@ class AssistedGrasp : public gazebo::WorldPlugin {
         // Contact samples arrive at WorldUpdateEnd, while this callback runs
         // at WorldUpdateBegin.  Keep the request pending until the bilateral
         // evidence is stable instead of failing on the first transient frame.
-        if(!contacts_[i].ready(now)){
+        // A handover is different from the initial pickup: the donor's fixed
+        // joint already holds the part, so the receiver's physical gripper
+        // feedback is the reliable confirmation. Requiring fresh Gazebo
+        // bilateral contacts here can fail because the donor joint suppresses
+        // the receiver-side contact pair.
+        const bool handover = !owner_.empty() && owner_ != p->side;
+        if(!handover && !contacts_[i].ready(now)){
           if(now < p->deadline)return;
           throw std::runtime_error("Require >=100 ms sustained contact on BOTH fingers");
         }

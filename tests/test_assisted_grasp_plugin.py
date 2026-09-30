@@ -23,6 +23,7 @@ class AssistedGraspPluginTests(unittest.TestCase):
         self.assertIn('if(now < p->deadline)return;', source)
         self.assertIn('p->deadline=world_->SimTime().Double()+2.0', source)
         self.assertIn('accepted; waiting for Gazebo contact evidence', source)
+        self.assertIn('const bool handover = !owner_.empty() && owner_ != p->side;', source)
         self.assertIn('CreateJoint("fixed",robot)', source)
         self.assertIn('next->Attach(palm,body)', source)
         self.assertIn('grasp_->Detach()', source)
